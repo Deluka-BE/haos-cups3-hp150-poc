@@ -24,7 +24,7 @@ connected printer or the working app to try this PoC.
    pass during the build and again at startup. The EULA is available in the
    image at `/usr/share/doc/hp150-uld/eula.txt`; review HP's license before use
    or redistribution. Proprietary files are never committed to Git.
-5. In **Configuration → Network**, leave `8631/tcp` mapped to `8631` (or choose
+5. In **Configuration → Network**, leave `863/tcp` mapped to `8631` (or choose
    another unused host port if needed). Keep **Protection mode** enabled.
 6. Click **Start**, then inspect **Logs** for driver validation and service startup.
    Click **Open Web UI**, or visit `http://<HAOS-IP>:8631/` using the configured
@@ -96,6 +96,61 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
 
+## Version 0.1.4 port correction and source findings
+
+HAOS publishes **host TCP 8631 → container TCP 863**. `ports` uses the container
+port as its key (`863/tcp: 8631`); `webui` and `watchdog` therefore use
+`[PORT:863]`, which Supervisor resolves to the configured host port. Inside the
+container use `http://localhost:863/`; from the LAN use
+`http://<HAOS-IP>:8631/`. Existing installations should check Configuration →
+Network after updating and ensure `863/tcp` is published as `8631`.
+
+The supplied 0.1.3 HAOS evidence reports listeners on hostname:863 and
+0.0.0.0:863 while the old metadata published container 8631. That mismatch is
+the demonstrated reachability failure. Version 0.1.4 deliberately requests 863
+and aligns all publication metadata; it does not patch upstream or rely on an
+assumed truncation. The non-root user and access settings are unchanged; the
+reported HAOS runtime already bound port 863 without added privileges.
+
+Source review did **not** find a rule truncating 8631 to 863:
+
+- Pinned [retrofit `_prSystemCB()`](https://github.com/OpenPrinting/pappl-retrofit/blob/49ad525a3715a57aae24c715ef0767b55ffb1991/pappl-retrofit/pappl-retrofit.c#L4642)
+  reads `server-port` with `cupsGetOption`, converts it with `atoi`, and passes
+  the integer to `papplSystemCreate` at lines 4768–4777.
+- Debian trixie's PAPPL source is 1.3.1-2.1 (not a Git pin in this image).
+  [PAPPL v1.3.1 `mainloop.c`](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/mainloop.c#L255)
+  passes the `-o` argument to `cupsParseOptions`;
+  [CUPS 2.4.10's parser](https://github.com/OpenPrinting/cups/blob/v2.4.10/cups/options.c#L276)
+  preserves the full numeric value.
+- [PAPPL `system.c`](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/system.c#L185)
+  stores `system->port = port`;
+  [listener creation](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/system-accessors.c#L2478)
+  formats it in a 255-byte buffer and passes the integer to `httpAddrListen`.
+  Debian's original source matches these files; its sole packaging patch changes
+  tests, not port handling.
+
+Thus these reviewed sources would bind 8631 when passed `server-port=8631`.
+The supplied log summary cannot establish why the deployed 0.1.3 process instead
+used 863. Resolving that discrepancy requires the actual image/package manifest,
+entrypoint contents and process arguments from HAOS. The new startup message
+prints the deliberately selected internal port for the next runtime check.
+
+`Unable to initialize DNS-SD: Daemon not running` remains expected: no Avahi daemon
+is started. PAPPL logs this separately from TCP listener creation; the supplied
+runtime proceeded to listen. Discovery/advertisement is a later issue and is
+not required to open the direct HTTP URL. No DNS-SD daemon, USB access, device
+mounts or privileged mode are added.
+
+0.1.4 still requires an ARM64 image rebuild and HAOS verification: confirm the
+startup message and listener use 863, open the host URL on 8631, and check Open
+Web UI and the optional watchdog. No capture conversion or printer writes were
+performed for this correction. Local validation passed: repository metadata and
+isolation checks, all six synthetic tests, all three shell syntax checks, Python
+compilation and `git diff --check`. An isolated shell harness with driver/staging
+and service commands stubbed confirmed default/explicit 863 produce
+`server-port=863` and conflicting, empty or malformed overrides fail. Docker,
+Podman, ShellCheck and Hadolint are unavailable in this worker.
+
 ## Build-time HP staging
 
 `scripts/stage-hp-uld.sh` downloads and checks the pinned official archive during
@@ -138,7 +193,7 @@ docker run --rm --platform linux/arm64 \
 export POC_PORT=8631
 docker run -d --name hp150-poc --platform linux/arm64 \
   --cap-drop=ALL --security-opt=no-new-privileges \
-  -p "127.0.0.1:$POC_PORT:$POC_PORT" -e POC_PORT \
+  -p "127.0.0.1:$POC_PORT:863" \
   -v "$PWD/run-data:/work" \
   hp150-poc:phase1
 POC_PORT="$POC_PORT" cups3_hp150_poc/scripts/smoke.sh
@@ -146,9 +201,11 @@ docker logs --tail 200 hp150-poc
 docker exec hp150-poc cat /usr/share/hp150-package-versions.txt
 ```
 
-Port must be 1024–65535; default is 8631. The application listens inside the
-container, but Docker publishes only host loopback. State, spool, copied PPDs,
-filter and libraries are confined to `run-data/`. Use fresh directories per
+`POC_PORT` in this host-side example selects the external port (default 8631).
+The container always uses port 863; do not pass the host variable with `-e`.
+The entrypoint accepts only internal `POC_PORT=863` (also its default), matching
+Dockerfile `EXPOSE 863`. Docker publishes only host loopback in this example. State, spool, copied
+PPDs, filter and libraries are confined to `run-data/`. Use fresh directories per
 experiment. No `--privileged`, `--device`, `/dev/bus/usb`, host networking, CUPS
 socket or existing printer state mounts. The smoke script checks HTTP and the
 HP driver listing; **it does not prove filter execution or SPL output**.
@@ -168,10 +225,10 @@ runtime driver identifier and CLI help:
 ```sh
 docker exec hp150-poc legacy-printer-app --help
 # Replace DRIVER_ID with the exact identifier from the drivers listing.
-docker exec hp150-poc legacy-printer-app add -u ipp://localhost:8631/ \
+docker exec hp150-poc legacy-printer-app add -u ipp://localhost:863/ \
   -d hp150-capture -v cups:capture:/hp150 -m DRIVER_ID
 # Inspect the actual queue URI in the UI/printer listing before submitting.
-docker exec hp150-poc legacy-printer-app printers -u ipp://localhost:8631/
+docker exec hp150-poc legacy-printer-app printers -u ipp://localhost:863/
 ```
 
 For the later runtime test, copy a small known one-page PDF to `/work/sample.pdf`
@@ -220,8 +277,10 @@ including both AArch64 ELF checks. A local staging harness (temporary output
 paths, cached archive and simulated Debian architecture) checked exact payload,
 filter mode 755, EULA retention and both architecture rejection paths. This is
 not an image build. Docker/Podman and printer hardware are absent here; ARM64
-image build, HAOS startup, port 8631, dynamic linking and IPP conversion remain
-unverified. Test startup with the printer physically unplugged.
+image build and HAOS runtime were not tested in that worker. The subsequently
+supplied HAOS 0.1.3 evidence confirms staging, validation, PPD loading and a
+listener on 863; external reachability, dynamic linking during conversion and
+IPP conversion were not demonstrated. Test startup with the printer physically unplugged.
 
 Repository conversion validation: `validate_repository.py` checks YAML syntax,
 required metadata, a single app, build inputs, non-USB access settings, and Git/
