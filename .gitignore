@@ -1,4 +1,8 @@
-/hp-driver/
-/run-data/
+hp-driver/
+run-data/
 __pycache__/
 *.pyc
+HP_Color_Laser_15x_Series.ppd
+rastertospl
+libscmssc.so
+15xsc.cts

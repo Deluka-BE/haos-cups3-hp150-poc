@@ -1,5 +1,57 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+**Experimental PoC, not a working printer release.** The separate working
+[CUPS 2.4 release](https://github.com/Deluka-BE/haos-cups-hp150) is untouched.
+This app cannot access USB and only writes capture files. Do not change the
+connected printer or the working app to try this PoC.
+
+## Install on Home Assistant OS (2026.10)
+
+1. On an **aarch64/ARM64** HAOS system, open **Settings → Apps → App store**
+   (called **Add-ons → Add-on store** in older interfaces).
+2. Open the top-right **⋮ → Repositories**, enter
+   `https://github.com/Deluka-BE/haos-cups3-hp150-poc`, and click **Add**.
+   Close the dialog; refresh the store if needed. If the previous attempt is
+   cached, remove this PoC URL and add it again.
+3. Select **HP 150 CUPS 3 Retrofit PoC (non-USB)** and click **Install**.
+   Supervisor builds the Debian image locally; compiling upstream sources can
+   take several minutes. This is currently offered only on aarch64.
+4. Before starting, obtain your own legally sourced **AArch64** HP driver files.
+   Use an existing file-access tool that exposes Home Assistant app configuration
+   directories (for example, an SSH or Samba app configured for that directory).
+   Find this app's directory under `/addon_configs/<repository-id>_cups3_hp150_poc/`;
+   the repository ID is assigned by Supervisor. Put these files directly there:
+   `HP_Color_Laser_15x_Series.ppd`, `rastertospl`, `libscmssc.so`, and
+   `cms/15xsc.cts`. They must be regular, nonempty files readable by UID 10001;
+   directories must be traversable. Do not copy from or mount the working app.
+   This directory is mounted read-only at `/hp-driver`. No HP files are shipped
+   in Git or the image. Without them, startup deliberately fails validation.
+5. In **Configuration → Network**, leave `8631/tcp` mapped to `8631` (or choose
+   another unused host port if needed). Keep **Protection mode** enabled.
+6. Click **Start**, then inspect **Logs** for driver validation and service startup.
+   Click **Open Web UI**, or visit `http://<HAOS-IP>:8631/` using the configured
+   host port. This is PAPPL's direct HTTP interface, without ingress or TLS.
+   Unlike the loopback-only development command below, HAOS publishes this port
+   to the host network interfaces; use it on a trusted local network.
+7. Use only the `cups:capture:/hp150` queue described below. This is not an
+   installation of CUPS 3 and does not print to the attached printer. Automatic
+   boot is disabled. The optional watchdog checks TCP reachability only, not
+   driver correctness or conversion success; enable it only after successful startup.
+
+The app retains the existing `/work` layout. Captures, spool and state there are
+experimental container-local data, not persistent `/data` storage or backed-up
+app configuration; export evidence before updates, rebuilds or uninstalling.
+User-supplied driver files remain in the app configuration directory, and can be
+included in Home Assistant backups: keep those backups private.
+
+The previous standalone Docker layout lacked root `repository.yaml` and an app
+subdirectory with `config.yaml`. Home Assistant therefore could not recognize
+it as an installable app repository. The Dockerfile, scripts and tests now live
+in `cups3_hp150_poc/`, which is the complete image build context.
+See [repository requirements](https://developers.home-assistant.io/docs/apps/repository/)
+and [current app metadata](https://developers.home-assistant.io/docs/apps/configuration/).
+No legacy `build.yaml` or implicit `BUILD_FROM` is used.
+
 This separate repository explores the least disruptive migration path: an IPP
 Printer Application around the established HP ULD PPD/filter stack. It does not
 install CUPS 3 or a CUPS scheduler. A future CUPS 3 client should see the PAPPL
@@ -64,7 +116,7 @@ The entire `hp-driver/` path is gitignored and dockerignored. Files must be
 nonempty regular files; symlinked components are rejected. Run:
 
 ```sh
-python3 scripts/validate-driver.py hp-driver
+python3 cups3_hp150_poc/scripts/validate-driver.py hp-driver
 ```
 
 Validation reports all missing files, SHA-256 hashes, PPD filter declarations,
@@ -77,7 +129,7 @@ makes the filter executable, so no host executable permission is required.
 ## Build and isolated non-USB smoke test
 
 ```sh
-docker buildx build --platform linux/arm64 --load -t hp150-poc:phase1 .
+docker buildx build --platform linux/arm64 --load -t hp150-poc:phase1 cups3_hp150_poc
 mkdir -p run-data/state run-data/spool run-data/capture
 # Container runs as UID/GID 10001; grant it access to this PoC directory only.
 sudo chown -R 10001:10001 run-data
@@ -94,7 +146,7 @@ docker run -d --name hp150-poc --platform linux/arm64 \
   -p "127.0.0.1:$POC_PORT:$POC_PORT" -e POC_PORT \
   -v "$PWD/hp-driver:/hp-driver:ro" -v "$PWD/run-data:/work" \
   hp150-poc:phase1
-POC_PORT="$POC_PORT" scripts/smoke.sh
+POC_PORT="$POC_PORT" cups3_hp150_poc/scripts/smoke.sh
 docker logs --tail 200 hp150-poc
 docker exec hp150-poc cat /usr/share/hp150-package-versions.txt
 ```
@@ -155,9 +207,10 @@ or extra libraries. Do not guess success or work around it by connecting USB.
    acceptance. No automatic USB support or production rollout in this phase.
 
 ```sh
-python3 -m unittest discover -s tests -v
-sh -n scripts/entrypoint.sh
-sh -n scripts/smoke.sh
+python3 validate_repository.py  # Requires PyYAML on the development host.
+python3 -m unittest discover -s cups3_hp150_poc/tests -v
+sh -n cups3_hp150_poc/scripts/entrypoint.sh
+sh -n cups3_hp150_poc/scripts/smoke.sh
 docker logs hp150-poc > run-data/container.log
 docker stop hp150-poc
 docker rm hp150-poc
@@ -170,3 +223,11 @@ available here. Docker/Podman, staged HP files and printer hardware are absent;
 image build, service startup, ARM64 filter linking, IPP conversion and hardware
 printing must be run on the development host. See the implementation report for
 what was actually executed.
+
+Repository conversion validation: `validate_repository.py` checks YAML syntax,
+required metadata, a single app, build inputs, non-USB access settings, and Git/
+Docker exclusions for HP files. All six synthetic PoC tests, both shell syntax
+checks and `git diff --check` passed locally. Metadata was compared with the
+current Home Assistant documentation and Supervisor schema; the full Supervisor
+validator and official container builder/linter were not run. No HAOS repository
+addition, installation, image build, web UI or watchdog runtime success is claimed.
