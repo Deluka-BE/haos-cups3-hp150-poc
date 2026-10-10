@@ -16,16 +16,14 @@ connected printer or the working app to try this PoC.
 3. Select **HP 150 CUPS 3 Retrofit PoC (non-USB)** and click **Install**.
    Supervisor builds the Debian image locally; compiling upstream sources can
    take several minutes. This is currently offered only on aarch64.
-4. Before starting, obtain your own legally sourced **AArch64** HP driver files.
-   Use an existing file-access tool that exposes Home Assistant app configuration
-   directories (for example, an SSH or Samba app configured for that directory).
-   Find this app's directory under `/addon_configs/<repository-id>_cups3_hp150_poc/`;
-   the repository ID is assigned by Supervisor. Put these files directly there:
-   `HP_Color_Laser_15x_Series.ppd`, `rastertospl`, `libscmssc.so`, and
-   `cms/15xsc.cts`. They must be regular, nonempty files readable by UID 10001;
-   directories must be traversable. Do not copy from or mount the working app.
-   This directory is mounted read-only at `/hp-driver`. No HP files are shipped
-   in Git or the image. Without them, startup deliberately fails validation.
+4. The image build downloads HP's [official ULD archive](https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz)
+   and verifies SHA256 `cebb9b7b6125e7406634bb9c2a98b01477d1e11d66c7c90474669de9927bc91d`
+   before extracting the four required files. No manual driver upload is needed.
+   Only the AArch64 filter and library, HP 15x PPD, CMS file and English EULA
+   are installed; HP's installer is never executed. The existing validator must
+   pass during the build and again at startup. The EULA is available in the
+   image at `/usr/share/doc/hp150-uld/eula.txt`; review HP's license before use
+   or redistribution. Proprietary files are never committed to Git.
 5. In **Configuration → Network**, leave `8631/tcp` mapped to `8631` (or choose
    another unused host port if needed). Keep **Protection mode** enabled.
 6. Click **Start**, then inspect **Logs** for driver validation and service startup.
@@ -41,8 +39,8 @@ connected printer or the working app to try this PoC.
 The app retains the existing `/work` layout. Captures, spool and state there are
 experimental container-local data, not persistent `/data` storage or backed-up
 app configuration; export evidence before updates, rebuilds or uninstalling.
-User-supplied driver files remain in the app configuration directory, and can be
-included in Home Assistant backups: keep those backups private.
+The driver files are baked into `/hp-driver`; no app configuration or device
+mount is needed.
 
 The previous standalone Docker layout lacked root `repository.yaml` and an app
 subdirectory with `config.yaml`. Home Assistant therefore could not recognize
@@ -64,8 +62,7 @@ IPP client -> PAPPL / Legacy Printer Application -> libppd / libcupsfilters2
 
 The working `Deluka-BE/haos-cups-hp150` CUPS 2.4 release is outside this PoC's
 scope. Do not mount, modify, or use its state/spool directories. No HP files are
-included in Git or the image build context. Do not publish images with locally
-staged proprietary files without checking the relevant license.
+included in Git or the image build context. Review HP's license before redistributing images containing the staged files.
 
 ## Build choices and prerequisites
 
@@ -99,32 +96,30 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
 
-## Stage locally
+## Build-time HP staging
 
-Obtain the HP ULD components from your own legally obtained driver distribution.
-Select the ARM64 binaries, not similarly named x86/ARM32 files. Stage exactly:
+`scripts/stage-hp-uld.sh` downloads and checks the pinned official archive during
+image build. It rejects any `BUILD_ARCH` other than `aarch64` and any Debian
+image architecture other than `arm64`. It extracts only these payload files:
 
 ```text
-hp-driver/
-  HP_Color_Laser_15x_Series.ppd
-  rastertospl
-  libscmssc.so
-  cms/15xsc.cts
+/hp-driver/HP_Color_Laser_15x_Series.ppd
+/hp-driver/rastertospl
+/hp-driver/libscmssc.so
+/hp-driver/cms/15xsc.cts
+/usr/share/doc/hp150-uld/eula.txt
 ```
 
-The entire `hp-driver/` path is gitignored and dockerignored. Files must be
-nonempty regular files; symlinked components are rejected. Run:
+The filter has mode 755; data, library and EULA have mode 644. The temporary
+archive and extraction directory are removed in the same build step. Download,
+hash, extraction or validation failure stops the build. No HP USB helper,
+backend, scanner or installer is installed.
 
-```sh
-python3 cups3_hp150_poc/scripts/validate-driver.py hp-driver
-```
-
-Validation reports all missing files, SHA-256 hashes, PPD filter declarations,
-ELF machine types and NEEDED/RPATH/RUNPATH entries. It uses `readelf`, never
-executes a filter or invokes `ldd`. Hashes are experiment identifiers, not
-vendor authenticity checks. Dynamic dependency resolution and ABI compatibility
-still require testing inside Debian. Startup copies the files into `/work` and
-makes the filter executable, so no host executable permission is required.
+The validator reports component hashes, PPD declarations, ELF architecture and
+dynamic dependencies using `readelf`; it never executes the HP filter or `ldd`.
+Startup copies the validated files to `/work`, including the relative
+`/work/filter/cms/15xsc.cts` path, and sets `LD_LIBRARY_PATH=/work/lib`.
+Dynamic linking and actual CMS lookup still need ARM64 runtime testing.
 
 ## Build and isolated non-USB smoke test
 
@@ -135,16 +130,16 @@ mkdir -p run-data/state run-data/spool run-data/capture
 sudo chown -R 10001:10001 run-data
 # Validate/inspect and enumerate PPDs before starting a service.
 docker run --rm --platform linux/arm64 \
-  -v "$PWD/hp-driver:/hp-driver:ro" -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" \
   hp150-poc:phase1 validate
 docker run --rm --platform linux/arm64 \
-  -v "$PWD/hp-driver:/hp-driver:ro" -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" \
   hp150-poc:phase1 drivers
 export POC_PORT=8631
 docker run -d --name hp150-poc --platform linux/arm64 \
   --cap-drop=ALL --security-opt=no-new-privileges \
   -p "127.0.0.1:$POC_PORT:$POC_PORT" -e POC_PORT \
-  -v "$PWD/hp-driver:/hp-driver:ro" -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" \
   hp150-poc:phase1
 POC_PORT="$POC_PORT" cups3_hp150_poc/scripts/smoke.sh
 docker logs --tail 200 hp150-poc
@@ -211,6 +206,7 @@ python3 validate_repository.py  # Requires PyYAML on the development host.
 python3 -m unittest discover -s cups3_hp150_poc/tests -v
 sh -n cups3_hp150_poc/scripts/entrypoint.sh
 sh -n cups3_hp150_poc/scripts/smoke.sh
+sh -n cups3_hp150_poc/scripts/stage-hp-uld.sh
 docker logs hp150-poc > run-data/container.log
 docker stop hp150-poc
 docker rm hp150-poc
@@ -218,15 +214,18 @@ docker rm hp150-poc
 sudo rm -rf "$PWD/run-data"
 ```
 
-Worker validation: synthetic backend and missing/invalid driver checks are
-available here. Docker/Podman, staged HP files and printer hardware are absent;
-image build, service startup, ARM64 filter linking, IPP conversion and hardware
-printing must be run on the development host. See the implementation report for
-what was actually executed.
+Version 0.1.3 validation: the official archive was downloaded and its pinned
+SHA256 matched. The existing validator passed on the four real extracted files,
+including both AArch64 ELF checks. A local staging harness (temporary output
+paths, cached archive and simulated Debian architecture) checked exact payload,
+filter mode 755, EULA retention and both architecture rejection paths. This is
+not an image build. Docker/Podman and printer hardware are absent here; ARM64
+image build, HAOS startup, port 8631, dynamic linking and IPP conversion remain
+unverified. Test startup with the printer physically unplugged.
 
 Repository conversion validation: `validate_repository.py` checks YAML syntax,
 required metadata, a single app, build inputs, non-USB access settings, and Git/
-Docker exclusions for HP files. All six synthetic PoC tests, both shell syntax
+Docker exclusions for HP files. All six synthetic PoC tests, all shell syntax
 checks and `git diff --check` passed locally. Metadata was compared with the
 current Home Assistant documentation and Supervisor schema; the full Supervisor
 validator and official container builder/linter were not run. No HAOS repository

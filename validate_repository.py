@@ -30,11 +30,12 @@ def main():
                 'host_network', 'host_pid', 'host_dbus', 'gpio', 'video',
                 'docker_api', 'hassio_api', 'homeassistant_api', 'ingress'):
         assert not config.get(key), f'Forbidden access: {key}'
-    assert config['map'] == [
-        {'type': 'app_config', 'read_only': True, 'path': '/hp-driver'}]
+    assert not config.get('map'), 'The baked-in HP files must not be hidden by mounts'
     dockerfile = (app / 'Dockerfile').read_text()
     assert 'FROM debian:trixie-slim' in dockerfile
     assert 'USER 10001:10001' in dockerfile
+    assert f'ARG BUILD_VERSION={config["version"]}' in dockerfile
+    assert 'RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"' in dockerfile
     for label in ('version', 'type', 'arch'):
         assert f'io.hass.{label}=' in dockerfile
     for source in re.findall(r'^COPY (\S+) ', dockerfile, re.MULTILINE):
