@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.4
+ARG BUILD_VERSION=0.1.5
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -49,6 +49,6 @@ RUN chmod 755 /opt/poc/scripts/* && mkdir -p /opt/poc/backend /work/state /work/
     && useradd --uid 10001 --no-create-home poc && chown -R poc:poc /work \
     && rm -rf /tmp/retrofit /tmp/libppd
 USER 10001:10001
-ENV POC_PORT=863
-EXPOSE 863
+ENV POC_PORT=8631
+EXPOSE 8631
 ENTRYPOINT ["/opt/poc/scripts/entrypoint.sh"]

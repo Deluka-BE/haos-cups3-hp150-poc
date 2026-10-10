@@ -1,9 +1,7 @@
 #!/bin/sh
 set -eu
-# Fixed internal port: HAOS publishes host 8631 -> container 863.
-# Reject overrides that would silently disagree with config.yaml/EXPOSE.
-POC_PORT=${POC_PORT-863}
-[ "$POC_PORT" = 863 ] || { echo 'Invalid POC_PORT: internal port must be 863' >&2; exit 1; }
+case "${POC_PORT:-8631}" in *[!0-9]*|'') echo 'Invalid POC_PORT' >&2; exit 1;; esac
+[ "${POC_PORT:-8631}" -ge 1024 ] && [ "${POC_PORT:-8631}" -le 65535 ]
 python3 /opt/poc/scripts/validate-driver.py /hp-driver
 mkdir -p /work/state/ppd /work/spool /work/capture /work/filter /work/lib
 cp /hp-driver/HP_Color_Laser_15x_Series.ppd /work/state/ppd/
@@ -21,8 +19,15 @@ cd /work/filter
 case "${1:-server}" in
     validate) exit 0 ;;
     drivers) exec legacy-printer-app drivers ;;
-    server) echo "Starting PAPPL on 0.0.0.0:$POC_PORT (HAOS default host port 8631)"
-        exec legacy-printer-app server -o "server-port=$POC_PORT" \
-        -o listen-hostname=0.0.0.0 -o log-file=- -o log-level=debug ;;
+    server) set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
+        -o listen-hostname=0.0.0.0 -o log-file=- -o log-level=debug
+        # Log only the validated numeric port and these fixed, non-secret arguments.
+        printf 'PAPPL launch: POC_PORT=<%s> (effective)\n' "${POC_PORT:-8631}"
+        arg_index=0
+        for arg do
+            printf 'PAPPL launch: argv[%s]=<%s>\n' "$arg_index" "$arg"
+            arg_index=$((arg_index + 1))
+        done
+        exec "$@" ;;
     *) echo 'Allowed modes: server, drivers, validate' >&2; exit 1 ;;
 esac

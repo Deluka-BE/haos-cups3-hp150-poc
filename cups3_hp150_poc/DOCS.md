@@ -1,6 +1,6 @@
 # Experimental non-USB PoC
 
-Install only on aarch64. Version 0.1.4 downloads HP's official ULD archive during
+Install only on aarch64. Version 0.1.5 downloads HP's official ULD archive during
 image build:
 https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz
 
@@ -13,18 +13,22 @@ redistribution. No proprietary files are in Git; no manual upload is required.
 Architecture mismatch, hash mismatch or driver validation failure stops the build.
 The existing validator runs again before PAPPL starts.
 
-The direct PAPPL HTTP/IPP service listens on container TCP 863, published by
-HAOS on host TCP 8631 (`863/tcp: 8631`). Open `http://<HAOS-IP>:8631/`.
-Web UI and watchdog use `[PORT:863]` to resolve the configured host port.
-After updating, check Configuration → Network maps `863/tcp` to `8631`.
-The container entrypoint accepts only internal `POC_PORT=863`; host-side Docker
-examples publish `8631:863`. There is no ingress.
+PAPPL is intended/configured on container TCP 8631, published by HAOS on host
+TCP 8631 (`8631/tcp: 8631`). Open `http://<HAOS-IP>:8631/`. Web UI and watchdog
+use `[PORT:8631]`. After updating from 0.1.4, check Configuration → Network maps
+`8631/tcp` to `8631`. Docker examples publish `8631:8631`. There is no ingress.
 
-The 0.1.3 listener on 863 disagreed with its old container-port mapping of 8631.
-The pinned retrofit/PAPPL sources preserve 8631; no upstream truncation was
-found. This release deliberately selects 863 without patching upstream. Why the
-old deployed process selected 863 requires its actual arguments/image evidence;
-see README for source references and remaining runtime verification.
+The user confirmed deployed HAOS 0.1.3 was reachable at
+`http://192.168.0.3:8631/` and showed the PAPPL/CUPS page, although PAPPL logged
+`:863`. Version 0.1.4 incorrectly treated that log as a mapping failure; this
+update restores the known-good 0.1.3 ports and entrypoint validation semantics.
+Reviewed retrofit/PAPPL/CUPS sources preserve 8631 and do not prove the cause.
+The discrepancy remains diagnostic; no speculative upstream fix is applied.
+Startup logs the effective validated POC_PORT and each exact server exec argument
+without dumping secrets or the environment. Rebuild on ARM64 and verify these
+lines, full listener logs, host reachability, Web UI and watchdog on HAOS; collect
+the actual image/package manifest if the discrepancy persists. Capture conversion
+still needs runtime testing. See README for source links and validation limits.
 
 `Unable to initialize DNS-SD: Daemon not running` is still expected because no
 Avahi daemon runs. The observed service continued to listen; discovery is a

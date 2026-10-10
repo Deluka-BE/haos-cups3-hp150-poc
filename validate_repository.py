@@ -23,9 +23,9 @@ def main():
     assert config['arch'] == ['aarch64']
     assert config['stage'] == 'experimental'
     assert config['boot'] == 'manual_only'
-    assert config['ports'] == {'863/tcp': 8631}
-    assert config['webui'] == 'http://[HOST]:[PORT:863]/'
-    assert config['watchdog'] == 'tcp://[HOST]:[PORT:863]'
+    assert config['ports'] == {'8631/tcp': 8631}
+    assert config['webui'] == 'http://[HOST]:[PORT:8631]/'
+    assert config['watchdog'] == 'tcp://[HOST]:[PORT:8631]'
     for key in ('usb', 'uart', 'udev', 'devices', 'privileged', 'full_access',
                 'host_network', 'host_pid', 'host_dbus', 'gpio', 'video',
                 'docker_api', 'hassio_api', 'homeassistant_api', 'ingress'):
@@ -34,12 +34,11 @@ def main():
     dockerfile = (app / 'Dockerfile').read_text()
     assert 'FROM debian:trixie-slim' in dockerfile
     assert 'USER 10001:10001' in dockerfile
-    assert 'ENV POC_PORT=863\n' in dockerfile
-    assert 'EXPOSE 863\n' in dockerfile
+    assert 'ENV POC_PORT=8631\n' in dockerfile
+    assert 'EXPOSE 8631\n' in dockerfile
     entrypoint = (app / 'scripts/entrypoint.sh').read_text()
-    assert 'POC_PORT=${POC_PORT-863}' in entrypoint
-    assert '[ "$POC_PORT" = 863 ] ||' in entrypoint
-    assert 'server-port=$POC_PORT' in entrypoint
+    assert 'server-port=${POC_PORT:-8631}' in entrypoint
+    assert 'exec "$@"' in entrypoint
     assert f'ARG BUILD_VERSION={config["version"]}' in dockerfile
     assert 'RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"' in dockerfile
     for label in ('version', 'type', 'arch'):
