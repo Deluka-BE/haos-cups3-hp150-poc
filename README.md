@@ -242,9 +242,9 @@ socket or existing printer state mounts. The smoke script checks HTTP and the
 HP driver listing; **it does not prove filter execution or SPL output**.
 Inspect the driver listing and debug logs if enumeration fails.
 
-## End-to-end capture test (0.1.7)
+## End-to-end capture test (0.1.8)
 
-Rebuild/update this PoC to **0.1.7**, then open `http://<HAOS-IP>:8631/`.
+Rebuild/update this PoC to **0.1.8**, then open `http://<HAOS-IP>:8631/`.
 Use PAPPL's **Add Printer** page, select **HP150 file capture** (device URI
 `cups:capture:/hp150`), and explicitly select **HP Color Laser 15x Series**
 from the driver list. Name it `hp150-capture`. Check the printer page shows
@@ -261,8 +261,8 @@ submission is needed. Wait for the job to complete and record its job id.
 
 The log must show `Using CUPS filter (printer driver): /work/filter/rastertospl`,
 the wrapper's `HP150 invoking /work/filter/rastertospl.real` diagnostic,
-ULD's CMS initialization/lookup messages without errors, and a `Captured job=…`
-line with nonzero bytes and SHA-256. Each nonempty invocation writes
+ULD's CMS initialization/lookup messages without errors, and an automatic `PASS: capture job=… bytes=… sha256=…
+format=QPDL-declared signature=PJL-QPDL` line. Each nonempty invocation writes
 `/work/capture/job-<id>-<unique>.spl` plus `.spl.json`; retries cannot overwrite
 previous captures. JSON contains only UTC timestamp, numeric job id, byte count,
 hash and basename, never user, title, options or environment. Administrative
@@ -271,7 +271,7 @@ conversion-success claim: failed filters can leave partial nonempty output.
 Job completion, filter logs and output verification must all agree.
 
 From a development host with Docker access to the experimental container,
-verify the exact capture named in its log (HAOS itself need not have Docker CLI):
+optionally recheck the exact capture matched by job id in `/work/capture` (HAOS itself need not have Docker CLI):
 
 ```sh
 docker exec hp150-poc python3 /opt/poc/scripts/verify-capture.py \
@@ -280,11 +280,17 @@ docker exec hp150-poc python3 /opt/poc/scripts/verify-capture.py \
 docker cp hp150-poc:/work/capture ./capture-evidence
 ```
 
-On HAOS, the capture log already exposes size/hash/path; a host administrator
+On HAOS, verification runs automatically after both capture files are finalized;
+the single PASS/FAIL line contains only job id, size, hash and fixed format/signature labels.
+A failed check returns backend failure and retains the completed bytes/metadata
+for diagnosis. Empty administrative opens remain silent and create no capture.
+The log omits paths, user, title, options, environment and document bytes; a host administrator
 with access to the PoC container can run the same verifier and export captures.
 There is no added capture-download web endpoint. The verifier checks metadata
-against bytes and the pinned filter's `@PJL ENTER LANGUAGE = QPDL` framing;
-SPL-C uses QPDL here. It rejects ordinary PDF/raster renamed `.spl`. Framing
+against bytes, including matching numeric job id and filename, and a complete
+`@PJL ENTER LANGUAGE = QPDL` line in a stream-start PJL header.
+`QPDL-declared` means a language declaration was detected, not validated QPDL
+page data. The verifier does not parse QPDL records or establish stream completeness. It rejects ordinary PDF/raster renamed `.spl`. Framing
 alone does not prove complete page data, CMS use, or physical printer acceptance.
 Keep captured document contents local.
 
@@ -319,7 +325,9 @@ empty administrative opens, failed input cleanup/redaction, fragmented side-chan
 requests, runtime paths/permissions, and token removal. They do **not** execute
 ARM64 ULD or PAPPL here: Docker/Podman, ARM64 runtime and HAOS are unavailable.
 The ARM64 image build, UI queue creation, test-page conversion, actual CMS lookup,
-job completion and captured QPDL verification remain HAOS acceptance steps.
+job completion and automatic capture-verifier integration remain HAOS acceptance steps.
+The user has since confirmed the 0.1.7 HAOS ARM64 capture path; 0.1.8 preserves
+that software path and requires a runtime check of the new automatic PASS/FAIL reporting.
 
 ## Phased acceptance and cleanup
 

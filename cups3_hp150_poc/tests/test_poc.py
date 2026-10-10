@@ -24,7 +24,7 @@ class CaptureTests(unittest.TestCase):
 
     def test_stdin_binary_and_unique_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            data = b'\x00\xffSPL\n'
+            data = b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\n\x00\xff'
             for _ in range(2):
                 result = self.invoke(['1', 'user', 'title', '1', ''], tmp, data)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -43,10 +43,10 @@ class CaptureTests(unittest.TestCase):
     def test_filename_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / 'input'
-            source.write_bytes(b'file input')
+            source.write_bytes(b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\r\nfile input')
             result = self.invoke(['2', 'user', 'title', '1', '', str(source)], tmp)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(next(Path(tmp).glob('*.spl')).read_bytes(), b'file input')
+            self.assertEqual(next(Path(tmp).glob('*.spl')).read_bytes(), source.read_bytes())
 
     def test_reject_device_uri(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -126,15 +126,92 @@ class RuntimeTests(unittest.TestCase):
                                            b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\n\x00\xff')
             self.assertEqual(result.returncode, 0, result.stderr)
             path = next(Path(tmp).glob('*.spl'))
-            module.verify(path)
+            self.assertTrue(module.verify(path)['passed'])
+            self.assertIn(b'PASS: capture job=12', result.stderr)
+            self.assertIn(b'format=QPDL-declared signature=PJL-QPDL', result.stderr)
+            self.assertNotIn(b'SECRET', result.stderr)
             path.write_bytes(b'%PDF-1.7')
-            with self.assertRaises(ValueError):
-                module.verify(path)
+            self.assertFalse(module.verify(path)['passed'])
             result = CaptureTests().invoke(['13', 'user', 'title', '1', ''], tmp, b'%PDF-1.7')
-            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b'FAIL: capture job=13', result.stderr)
             other = next(p for p in Path(tmp).glob('*.spl') if p != path)
-            with self.assertRaisesRegex(ValueError, 'QPDL'):
-                module.verify(other)
+            self.assertFalse(module.verify(other)['passed'])
+
+
+    def test_verifier_failures_and_redaction(self):
+        import hashlib
+        verifier = ROOT / 'scripts/verify-capture.py'
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'job-4-fixture.spl'
+            declaration = b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\n'
+            def check(data, metadata):
+                path.write_bytes(data)
+                sidecar = Path(str(path) + '.json')
+                if metadata is None:
+                    sidecar.unlink(missing_ok=True)
+                else:
+                    sidecar.write_text(metadata)
+                result = subprocess.run([sys.executable, str(verifier), str(path)], capture_output=True)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertTrue(result.stdout.startswith(b'FAIL: capture job=4 '))
+                self.assertNotIn(b'SECRET', result.stdout + result.stderr)
+                self.assertEqual(result.stderr, b'')
+            for metadata in (None, '{SECRET', '[]', 'null', '{}',
+                             '{"job_id":"SECRET","file":"SECRET"}'):
+                check(declaration, metadata)
+            for data in (b'', b'%PDF-1.7 SECRET\n' + declaration,
+                         b'RaS2SECRET', b'SECRET' + declaration,
+                         declaration.rstrip(b'\n'), b'unknown SECRET'):
+                metadata = json.dumps({'job_id': 4, 'file': path.name,
+                                       'size_bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+                check(data, metadata)
+            for field, value in (('job_id', True), ('job_id', 5), ('size_bytes', True),
+                                 ('sha256', 'SECRET'), ('file', 'SECRET')):
+                metadata = {'job_id': 4, 'file': path.name, 'size_bytes': len(declaration),
+                            'sha256': hashlib.sha256(declaration).hexdigest()}
+                metadata[field] = value
+                check(declaration, json.dumps(metadata))
+            path.unlink()
+            result = subprocess.run([sys.executable, str(verifier), str(path)], capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b'sha256=unavailable', result.stdout)
+
+    def test_installed_backend_verifier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = Path(tmp) / 'capture'
+            shutil.copy(BACKEND, backend)
+            shutil.copy(ROOT / 'scripts/verify-capture.py', Path(tmp) / 'verify-capture.py')
+            result = subprocess.run([sys.executable, str(backend), '8', 'SECRET', 'SECRET', '1', ''],
+                                    input=b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\n',
+                                    env={**os.environ, 'CAPTURE_DIR': tmp, 'DEVICE_URI': 'capture:/hp150'},
+                                    capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(result.stderr.splitlines()), 1)
+            self.assertIn(b'PASS: capture job=8', result.stderr)
+            self.assertNotIn(b'SECRET', result.stderr)
+            self.assertIn('cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py',
+                          (ROOT / 'Dockerfile').read_text())
+
+    def test_verifier_exception_retains_completed_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = Path(tmp) / 'capture'
+            shutil.copy(BACKEND, backend)
+            (Path(tmp) / 'verify-capture.py').write_text(
+                'def verify(path):\n    raise RuntimeError("SECRET")\n')
+            result = subprocess.run([sys.executable, str(backend), '9', 'SECRET', 'SECRET', '1', ''],
+                                    input=b'fixture SECRET',
+                                    env={**os.environ, 'CAPTURE_DIR': tmp, 'DEVICE_URI': 'capture:/hp150'},
+                                    capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(len(result.stderr.splitlines()), 1)
+            self.assertIn(b'FAIL: capture job=9', result.stderr)
+            self.assertNotIn(b'SECRET', result.stderr)
+            path = next(Path(tmp).glob('*.spl'))
+            self.assertEqual(path.read_bytes(), b'fixture SECRET')
+            self.assertTrue(Path(str(path) + '.json').is_file())
+            self.assertFalse(list(Path(tmp).glob('*.part')))
 
     def test_wrapper_preserves_stream_arguments_and_status(self):
         # Substitute only fixed container paths, execute the actual wrapper shell logic.

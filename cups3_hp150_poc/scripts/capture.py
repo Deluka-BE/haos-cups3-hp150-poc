@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import select
+import runpy
 import stat
 import struct
 import threading
@@ -61,6 +62,7 @@ def main(argv):
     final = None
     metadata_part = None
     try:
+        verifier = runpy.run_path(str(pathlib.Path(__file__).resolve().with_name('verify-capture.py')))
         directory.mkdir(parents=True, exist_ok=True)
         fd, filename = tempfile.mkstemp(prefix=f'job-{argv[1]}-', suffix='.spl.part', dir=directory)
         digest = hashlib.sha256()
@@ -92,10 +94,14 @@ def main(argv):
             os.fsync(output.fileno())
         os.rename(filename, final)
         os.rename(metadata_part, final + '.json')
-        print(f'INFO: Captured job={argv[1]} bytes={size} sha256={digest.hexdigest()} file={final}',
-              file=sys.stderr)
-        return 0
+        result = verifier['verify'](pathlib.Path(final))
+        verifier['report'](result, stream=sys.stderr)
+        return 0 if result['passed'] else 1
     except Exception:
+        if final and pathlib.Path(final + '.json').is_file():
+            print(f'FAIL: capture job={int(argv[1])} bytes={size} sha256={digest.hexdigest()} '
+                  'format=unknown signature=none', file=sys.stderr)
+            return 1  # Retain completed evidence even if verification itself fails.
         for path in (filename, final, metadata_part):
             if path:
                 pathlib.Path(path).unlink(missing_ok=True)

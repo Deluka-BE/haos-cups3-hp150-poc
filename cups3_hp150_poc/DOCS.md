@@ -1,6 +1,6 @@
 # Experimental non-USB PoC
 
-Install only on aarch64. Version 0.1.7 downloads HP's official ULD archive during
+Install only on aarch64. Version 0.1.8 downloads HP's official ULD archive during
 image build:
 https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz
 
@@ -74,8 +74,13 @@ Create `hp150-capture` in the PAPPL web UI with `cups:capture:/hp150` and the
 HP Color Laser 15x Series driver. Use its **Print Test Page** action, wait for
 completion, and match the job id to the filter and capture diagnostics.
 Output is `/work/capture/job-<id>-<unique>.spl` with `.spl.json` containing UTC
-time, job id, size and SHA-256. Run `/opt/poc/scripts/verify-capture.py` on the
-exact capture to check byte integrity and HP QPDL framing. Export evidence before
+time, job id, size and SHA-256. Version 0.1.8 automatically checks each completed capture and logs one PASS/FAIL
+line with job id, byte count, SHA-256 and fixed format/signature labels. A failure
+returns backend failure and retains the evidence. The optional manual
+`/opt/poc/scripts/verify-capture.py` uses the same logic. PASS checks metadata
+integrity and a stream-start PJL QPDL declaration; it does not validate QPDL
+page records, stream completeness or printer acceptance. No document bytes,
+paths, titles, options or environment are logged by the verifier. Export evidence before
 updates; `/work` remains container-local. See README for commands and acceptance.
 
 The backend receives the final PPD-filter stream; no architecture change was
@@ -87,3 +92,7 @@ The backend handles CUPS side-channel capability/status requests for the virtual
 sink and avoids empty captures from administrative opens. No USB/device access
 is enabled. Tests prove scaffolding locally; full ARM64/HAOS conversion and CMS
 initialization still require runtime verification.
+
+The 0.1.7 HAOS ARM64 capture path is user-confirmed. Rebuild 0.1.8 and verify
+automatic PASS reporting for a normal test page, retained evidence on verifier
+failure, job status and continued host Web UI access on 8631. USB stays disabled.

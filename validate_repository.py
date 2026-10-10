@@ -34,6 +34,7 @@ def main():
     dockerfile = (app / 'Dockerfile').read_text()
     assert 'FROM debian:trixie-slim' in dockerfile
     assert 'USER 10001:10001' in dockerfile
+    assert 'cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py' in dockerfile
     assert 'ENV POC_PORT=8631\n' in dockerfile
     assert 'EXPOSE 8631\n' in dockerfile
     entrypoint = (app / 'scripts/entrypoint.sh').read_text()
