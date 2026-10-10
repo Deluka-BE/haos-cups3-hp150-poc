@@ -242,42 +242,84 @@ socket or existing printer state mounts. The smoke script checks HTTP and the
 HP driver listing; **it does not prove filter execution or SPL output**.
 Inspect the driver listing and debug logs if enumeration fails.
 
-## Capture scaffold and exact remaining runtime test
+## End-to-end capture test (0.1.7)
 
-The `capture` backend implements CUPS discovery and stdin/filename input. It
-accepts only `capture:/hp150`, writes unique `job-*.spl` files via temporary files
-and atomic rename, and never opens a device. pappl-retrofit wraps CUPS backend
-URIs with `cups:`, so the application queue URI is `cups:capture:/hp150`.
+Rebuild/update this PoC to **0.1.7**, then open `http://<HAOS-IP>:8631/`.
+Use PAPPL's **Add Printer** page, select **HP150 file capture** (device URI
+`cups:capture:/hp150`), and explicitly select **HP Color Laser 15x Series**
+from the driver list. Name it `hp150-capture`. Check the printer page shows
+that driver and capture URI before submitting. The discovery record includes
+HP's matching IEEE-1284 identity; manual driver selection avoids ambiguity.
+Existing capture queues can be reused after checking their driver and URI.
 
-After the smoke test, open `http://127.0.0.1:8631/` and add a queue using the
-capture device and the staged HP driver. Alternatively, after confirming the
-runtime driver identifier and CLI help:
+On that printer's page, use the normal **Print Test Page** action. The pinned
+Legacy application installs `testpage.pdf` and its test-page callback submits
+it through the regular PAPPL job/conversion path. Alternatively submit a small
+known one-page PDF to the exact IPP printer URI displayed by PAPPL from a normal
+IPP client; do not guess the URI. No custom HTTP endpoint or direct filter
+submission is needed. Wait for the job to complete and record its job id.
+
+The log must show `Using CUPS filter (printer driver): /work/filter/rastertospl`,
+the wrapper's `HP150 invoking /work/filter/rastertospl.real` diagnostic,
+ULD's CMS initialization/lookup messages without errors, and a `Captured job=…`
+line with nonzero bytes and SHA-256. Each nonempty invocation writes
+`/work/capture/job-<id>-<unique>.spl` plus `.spl.json`; retries cannot overwrite
+previous captures. JSON contains only UTC timestamp, numeric job id, byte count,
+hash and basename, never user, title, options or environment. Administrative
+opens with no data produce no files. Metadata records received bytes, not a
+conversion-success claim: failed filters can leave partial nonempty output.
+Job completion, filter logs and output verification must all agree.
+
+From a development host with Docker access to the experimental container,
+verify the exact capture named in its log (HAOS itself need not have Docker CLI):
 
 ```sh
-docker exec hp150-poc legacy-printer-app --help
-# Replace DRIVER_ID with the exact identifier from the drivers listing.
-docker exec hp150-poc legacy-printer-app add -u ipp://localhost:8631/ \
-  -d hp150-capture -v cups:capture:/hp150 -m DRIVER_ID
-# Inspect the actual queue URI in the UI/printer listing before submitting.
-docker exec hp150-poc legacy-printer-app printers -u ipp://localhost:8631/
+docker exec hp150-poc python3 /opt/poc/scripts/verify-capture.py \
+  /work/capture/job-1-REPLACE_WITH_ACTUAL_SUFFIX.spl
+# Export the bytes and metadata before updating/removing the app.
+docker cp hp150-poc:/work/capture ./capture-evidence
 ```
 
-For the later runtime test, copy a small known one-page PDF to `/work/sample.pdf`
-and submit it to that **capture queue only**, using its actual displayed IPP URI
-and `ipptool` Print-Job or `legacy-printer-app submit`. Record the completed job
-status, debug filter invocation, byte count, SHA-256, and a hex inspection of
-`run-data/capture/job-*.spl`. A filename ending in `.spl` alone proves nothing:
-confirm `rastertospl` executed and produced plausible SPL data, not PDF/raster.
-Keep output local; it may contain document content.
+On HAOS, the capture log already exposes size/hash/path; a host administrator
+with access to the PoC container can run the same verifier and export captures.
+There is no added capture-download web endpoint. The verifier checks metadata
+against bytes and the pinned filter's `@PJL ENTER LANGUAGE = QPDL` framing;
+SPL-C uses QPDL here. It rejects ordinary PDF/raster renamed `.spl`. Framing
+alone does not prove complete page data, CMS use, or physical printer acceptance.
+Keep captured document contents local.
 
-This backend is a safe scaffold: PAPPL/retrofit discovery, URI handling, job
-completion and side-channel behavior have not been tested in this worker.
-It does not implement bidirectional CUPS side-channel responses. If the runtime
-waits on such queries, diagnose the logs and add explicit unsupported responses
-before claiming completion. Confirm ULD CMS lookup: startup provides
-`/work/filter/cms/15xsc.cts`, runs in `/work/filter`, and sets
-`LD_LIBRARY_PATH=/work/lib`. The binary may require another hard-coded CMS path
-or extra libraries. Do not guess success or work around it by connecting USB.
+### Filter/backend architecture and lookup
+
+Pinned retrofit `print-job.c` appends the PPD external filter and then
+`_prPrintFilterFunction` to the chain. Its CUPS device path launches our backend
+with the job's filter data and writes the final stream to backend stdin.
+Thus capture already sits after `rastertospl`; no architectural replacement
+is necessary. The backend answers CUPS fd 4 GET_STATE/GET_CONNECTED for the
+virtual writable sink, GET_BIDI as unsupported, and GET_DEVICE_ID with the HP
+identity. Other requests return NOT_IMPLEMENTED, including drain/reset;
+there is no physical printer or bidirectional printer traffic.
+
+The original relative `/work/filter/cms` layout did not match the ULD lookup.
+Inspection of the hash-verified ARM64 binary finds `CUPS_DATADIR` and
+`%s/model/uld-%s/cms/%s`; its manufacturer conversion lowercases `HP`, the
+PPD's `linuxIdentify` is `15x`, and libscmssc appends `sc.cts`.
+Startup stages `/work/share/cups/model/uld-hp/cms/15xsc.cts`; the HP wrapper
+exports `CUPS_DATADIR=/work/share/cups` only for the vendor filter, preserving
+the standard data lookup for other conversion filters. The executable wrapper keeps the PPD's normal
+`rastertospl` name, fixes library/CMS variables before exec, and invokes the
+unchanged vendor binary at `/work/filter/rastertospl.real`. stdout is untouched.
+`LD_LIBRARY_PATH=/work/lib` supplies `libscmssc.so`; startup now checks actual
+library loading (including CUPS ABI libraries), executable/readable components,
+and writable capture/spool/state directories. Neither checker nor wrapper dumps
+the environment, job arguments, or loader error text. HAOS token sanitization
+remains in place for the application and children.
+
+Local checks cover binary-preserving capture, retry uniqueness, metadata hashes,
+empty administrative opens, failed input cleanup/redaction, fragmented side-channel
+requests, runtime paths/permissions, and token removal. They do **not** execute
+ARM64 ULD or PAPPL here: Docker/Podman, ARM64 runtime and HAOS are unavailable.
+The ARM64 image build, UI queue creation, test-page conversion, actual CMS lookup,
+job completion and captured QPDL verification remain HAOS acceptance steps.
 
 ## Phased acceptance and cleanup
 

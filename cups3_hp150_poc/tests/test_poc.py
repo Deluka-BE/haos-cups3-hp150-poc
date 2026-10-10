@@ -32,6 +32,13 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual(len(files), 2)
             self.assertTrue(all(path.read_bytes() == data for path in files))
             self.assertFalse(list(Path(tmp).glob('*.part')))
+            import hashlib
+            for path in files:
+                meta = json.loads(Path(str(path) + '.json').read_text())
+                self.assertEqual(meta['job_id'], 1)
+                self.assertEqual(meta['size_bytes'], len(data))
+                self.assertEqual(meta['sha256'], hashlib.sha256(data).hexdigest())
+                self.assertEqual(set(meta), {'job_id', 'size_bytes', 'sha256', 'file', 'timestamp_utc'})
 
     def test_filename_input(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -48,6 +55,115 @@ class CaptureTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_empty_admin_open_and_failed_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self.invoke(['0', 'user', 'title', '1', ''], tmp)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+            result = self.invoke(['1', 'user', 'SECRET', '1', '', tmp + '/SECRET'], tmp)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(b'SECRET', result.stderr)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_side_channel(self):
+        import importlib.util
+        import socket
+        import struct
+        import threading
+        spec = importlib.util.spec_from_file_location('capture', BACKEND)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        client, backend = socket.socketpair()
+        with client, backend:
+            client.settimeout(2)
+            stop = threading.Event()
+            thread = threading.Thread(target=module.side_channel, args=(stop, backend.fileno()))
+            thread.start()
+            try:
+                for command, status, payload in [(3, 1, b'\x00'), (5, 1, b'\x01'), (8, 1, b'\x01'), (2, 7, b'')]:
+                    request = struct.pack('!BBH', command, 0, 0)
+                    client.sendall(request[:2])
+                    client.sendall(request[2:])
+                    header = client.recv(4)
+                    self.assertEqual(struct.unpack('!BBH', header), (command, status, len(payload)))
+                    if payload:
+                        self.assertEqual(client.recv(len(payload)), payload)
+            finally:
+                stop.set()
+                thread.join(2)
+
+
+class RuntimeTests(unittest.TestCase):
+    def test_runtime_paths_and_permissions(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('runtime', ROOT / 'scripts/runtime-check.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            root = Path(tmp)
+            with self.assertRaises(RuntimeError):
+                module.check(root, load=False)
+            for name in ('filter/rastertospl', 'filter/rastertospl.real', 'lib/libscmssc.so',
+                         'share/cups/model/uld-hp/cms/15xsc.cts', 'state/ppd/HP_Color_Laser_15x_Series.ppd'):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture')
+                path.chmod(0o755 if name.startswith('filter/') else 0o644)
+            for name in ('capture', 'spool'):
+                (root / name).mkdir()
+            module.check(root, load=False)
+            (root / 'filter/rastertospl.real').chmod(0o644)
+            with self.assertRaisesRegex(RuntimeError, 'Non-executable'):
+                module.check(root, load=False)
+
+    def test_capture_verifier(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('verify', ROOT / 'scripts/verify-capture.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            result = CaptureTests().invoke(['12', 'SECRET', 'SECRET', '1', 'SECRET'], tmp,
+                                           b'\x1b%-12345X@PJL ENTER LANGUAGE = QPDL\n\x00\xff')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            path = next(Path(tmp).glob('*.spl'))
+            module.verify(path)
+            path.write_bytes(b'%PDF-1.7')
+            with self.assertRaises(ValueError):
+                module.verify(path)
+            result = CaptureTests().invoke(['13', 'user', 'title', '1', ''], tmp, b'%PDF-1.7')
+            self.assertEqual(result.returncode, 0)
+            other = next(p for p in Path(tmp).glob('*.spl') if p != path)
+            with self.assertRaisesRegex(ValueError, 'QPDL'):
+                module.verify(other)
+
+    def test_wrapper_preserves_stream_arguments_and_status(self):
+        # Substitute only fixed container paths, execute the actual wrapper shell logic.
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            root = Path(tmp)
+            for name in ('lib/libscmssc.so', 'share/cups/model/uld-hp/cms/15xsc.cts', 'test.ppd'):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'fixture')
+            (root / 'filter').mkdir()
+            real = root / 'filter/rastertospl.real'
+            real.write_text('#!' + sys.executable + '\n' +
+                            'import os, sys\n'
+                            'assert "SUPERVISOR_TOKEN" not in os.environ\n'
+                            'assert "HASSIO_TOKEN" not in os.environ\n'
+                            'assert sys.argv[1:] == ["7", "SECRET", "SECRET", "1", ""]\n'
+                            'sys.stdout.buffer.write(sys.stdin.buffer.read())\n'
+                            'sys.exit(9)\n')
+            real.chmod(0o755)
+            wrapper = root / 'wrapper.sh'
+            wrapper.write_text((ROOT / 'scripts/rastertospl-wrapper.sh').read_text().replace('/work', tmp))
+            result = subprocess.run(['sh', str(wrapper), '7', 'SECRET', 'SECRET', '1', ''],
+                                    input=b'\x00\xffSPL', capture_output=True,
+                                    env={**os.environ, 'PPD': str(root / 'test.ppd'),
+                                         'SUPERVISOR_TOKEN': 'SECRET', 'HASSIO_TOKEN': 'SECRET'})
+            self.assertEqual(result.returncode, 9, result.stderr)
+            self.assertEqual(result.stdout, b'\x00\xffSPL')
+            self.assertNotIn(b'SECRET', result.stderr)
+
 
 class LaunchEnvironmentTests(unittest.TestCase):
     def test_app_and_child_environment(self):
@@ -58,6 +174,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
         end = source.index('export LD_LIBRARY_PATH=')
         source = source[:start] + source[end:]
         source = source.replace('cd /work/filter', ': # container cwd stub')
+        source = source.replace('python3 /opt/poc/scripts/runtime-check.py', ': # runtime check stub')
         # Use the workspace because some workers mount /tmp with noexec.
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
             directory = Path(tmp)

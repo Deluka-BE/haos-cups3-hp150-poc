@@ -5,22 +5,24 @@ case "${POC_PORT:-8631}" in *[!0-9]*|'') echo 'Invalid POC_PORT' >&2; exit 1;; e
 python3 /opt/poc/scripts/validate-driver.py /hp-driver
 mkdir -p /work/state/ppd /work/spool /work/capture /work/filter /work/lib
 cp /hp-driver/HP_Color_Laser_15x_Series.ppd /work/state/ppd/
-cp /hp-driver/rastertospl /work/filter/
-chmod 755 /work/filter/rastertospl
+cp /hp-driver/rastertospl /work/filter/rastertospl.real
+cp /opt/poc/scripts/rastertospl-wrapper.sh /work/filter/rastertospl
+chmod 755 /work/filter/rastertospl /work/filter/rastertospl.real
 cp /hp-driver/libscmssc.so /work/lib/
-mkdir -p /work/filter/cms
-cp /hp-driver/cms/15xsc.cts /work/filter/cms/
+mkdir -p /work/share/cups/model/uld-hp/cms
+cp /hp-driver/cms/15xsc.cts /work/share/cups/model/uld-hp/cms/
 export LD_LIBRARY_PATH=/work/lib
 export PPD_DIRS=/work/state/ppd USER_PPD_DIR=/work/state/ppd
 export FILTER_DIR=/work/filter BACKEND_DIR=/opt/poc/backend
 export STATE_DIR=/work/state SPOOL_DIR=/work/spool CAPTURE_DIR=/work/capture
-# Working directory is also isolated; ULD CMS lookup location needs runtime confirmation.
+# ULD uses CUPS_DATADIR/model/uld-<lowercase manufacturer>/cms/<linuxIdentify>.
 cd /work/filter
 # Retrofit debug logging can expose inherited environment variables.
 # This capture-only PoC needs neither Supervisor nor Core API credentials.
 # Remove both HAOS token aliases before any app launch, including drivers mode;
 # filters and backends inherit the sanitized app environment.
 unset SUPERVISOR_TOKEN HASSIO_TOKEN
+python3 /opt/poc/scripts/runtime-check.py
 case "${1:-server}" in
     validate) exit 0 ;;
     drivers) exec legacy-printer-app drivers ;;

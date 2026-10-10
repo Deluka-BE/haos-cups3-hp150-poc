@@ -1,6 +1,6 @@
 # Experimental non-USB PoC
 
-Install only on aarch64. Version 0.1.6 downloads HP's official ULD archive during
+Install only on aarch64. Version 0.1.7 downloads HP's official ULD archive during
 image build:
 https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz
 
@@ -67,3 +67,23 @@ runtime verification of 0.1.6 remain required.
 The working `Deluka-BE/haos-cups-hp150` CUPS 2.4 release is separate and untouched.
 See the [repository README](https://github.com/Deluka-BE/haos-cups3-hp150-poc#readme)
 for installation, staging, capture testing and current validation limits.
+
+## Capture conversion in 0.1.7
+
+Create `hp150-capture` in the PAPPL web UI with `cups:capture:/hp150` and the
+HP Color Laser 15x Series driver. Use its **Print Test Page** action, wait for
+completion, and match the job id to the filter and capture diagnostics.
+Output is `/work/capture/job-<id>-<unique>.spl` with `.spl.json` containing UTC
+time, job id, size and SHA-256. Run `/opt/poc/scripts/verify-capture.py` on the
+exact capture to check byte integrity and HP QPDL framing. Export evidence before
+updates; `/work` remains container-local. See README for commands and acceptance.
+
+The backend receives the final PPD-filter stream; no architecture change was
+needed. The CMS layout now follows the vendor's CUPS_DATADIR lookup under
+`/work/share/cups/model/uld-hp/cms/15xsc.cts`. A filter wrapper preserves the
+normal PPD chain and invokes the real ULD binary with fixed lookup settings.
+Startup checks component permissions, directory writes and library loading.
+The backend handles CUPS side-channel capability/status requests for the virtual
+sink and avoids empty captures from administrative opens. No USB/device access
+is enabled. Tests prove scaffolding locally; full ARM64/HAOS conversion and CMS
+initialization still require runtime verification.
