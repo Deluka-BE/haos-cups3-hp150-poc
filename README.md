@@ -2,7 +2,7 @@
 
 **Experimental PoC, not a working printer release.** The separate working
 [CUPS 2.4 release](https://github.com/Deluka-BE/haos-cups-hp150) is untouched.
-This app cannot access USB and only writes capture files. Do not change the
+This app only writes capture files; USB printing remains disabled. Do not change the
 connected printer or the working app to try this PoC.
 
 ## Install on Home Assistant OS (2026.10)
@@ -95,6 +95,47 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian PAPPL](https://packages.debian.org/trixie/libpappl-dev),
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
+
+## Read-only USB diagnostics (0.1.9)
+
+Normal server startup reports existence and current-UID read/search access for
+`/dev/bus/usb`. It prefers `lsusb`, with a bounded sysfs fallback reading only
+bus/device numbers and vendor/product IDs. At most 32 records are logged; no
+manufacturer strings, serial attributes or raw sysfs data are dumped.
+
+A separate CUPS USB backend runs with no arguments (discovery only), followed
+by `legacy-printer-app devices` with the existing capture-only configuration.
+The build extracts only the USB backend from Debian's `cups` package into
+`/opt/poc/diagnostics/usb`; it installs no scheduler. That directory is never
+PAPPL's backend directory. Each subprocess gets an explicit credential-free
+environment, an eight-second timeout and a 32-KiB stdout limit; stderr is
+discarded. Only matching HP Color Laser 150/150a USB URIs (maximum 512 characters,
+known serial/interface parameters) are logged, never raw discovery output.
+Unrecognized or unsafe URIs are suppressed. PAPPL should report no physical HP
+URI while its allowlist remains `capture`; CUPS discovery independently shows
+any visible HP URI. No queue is created, job submitted or printer reset.
+Discovery may read USB identity descriptors; it sends no print data.
+
+`not-reported` means no accepted matching URI was found, not proof of physical
+absence. `unavailable`, `failed`, `timeout` and `output-limit` are inconclusive.
+Directory access and USB IDs alone do not prove device-node access or printing
+permission. The sysfs fallback examines at most 256 entries. Diagnostics are
+nonfatal and run only in server mode. USB printing, privileges, mounts, driver
+staging, PAPPL capture allowlist, HP filter/library/CMS and automatic QPDL
+verification remain unchanged. No evidence here justifies extra access.
+
+Local 0.1.9 validation passed all 19 tests, the repository/isolation validator,
+all four shell syntax checks, Python compilation and `git diff --check`.
+The worker reports `/dev/bus/usb` absent and zero `lsusb` records; both printing
+backend probes are unavailable here, so HP visibility/URI is inconclusive.
+Docker/Podman and ARM64/HAOS runtime are unavailable; no image build or hardware
+acceptance is claimed. Debian's [cups file list](https://packages.debian.org/trixie/arm64/cups/filelist)
+identifies the isolated backend source; PAPPL's [devices implementation](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/mainloop-subcommands.c)
+uses discovery rather than queue creation.
+
+After rebuilding 0.1.9 on HAOS, collect only the `USB diagnostics:` lines and
+repeat the normal capture test with automatic PASS reporting. Local tests use
+synthetic discovery and cannot establish HAOS visibility or a physical HP URI.
 
 ## Security fix in 0.1.6
 

@@ -26,7 +26,8 @@ python3 /opt/poc/scripts/runtime-check.py
 case "${1:-server}" in
     validate) exit 0 ;;
     drivers) exec legacy-printer-app drivers ;;
-    server) set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
+    server) python3 /opt/poc/scripts/usb-diagnostics.py
+        set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
         -o listen-hostname=0.0.0.0 -o log-file=- -o log-level=debug
         # Log only the validated numeric port and these fixed, non-secret arguments.
         printf 'PAPPL launch: POC_PORT=<%s> (effective)\n' "${POC_PORT:-8631}"

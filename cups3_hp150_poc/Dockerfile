@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.8
+ARG BUILD_VERSION=0.1.9
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -12,8 +12,15 @@ RUN test "$BUILD_ARCH" = aarch64 && test "$(dpkg --print-architecture)" = arm64
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git build-essential autoconf automake libtool pkg-config gettext autopoint \
     libpappl-dev libcupsfilters2-dev libcups2-dev libcupsimage2-dev zlib1g-dev \
-    ghostscript poppler-utils mupdf-tools fonts-dejavu-core python3 file binutils curl cups-ipp-utils \
+    ghostscript poppler-utils mupdf-tools fonts-dejavu-core python3 file binutils curl cups-ipp-utils usbutils libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
+# Extract only CUPS' discovery backend, without installing/starting a scheduler.
+RUN mkdir -p /tmp/cups-usb /opt/poc/diagnostics \
+    && cd /tmp/cups-usb && apt-get update && apt-get download cups \
+    && dpkg-deb -x cups_*.deb extracted \
+    && cp extracted/usr/lib/cups/backend-available/usb /opt/poc/diagnostics/usb \
+    && chmod 755 /opt/poc/diagnostics/usb \
+    && rm -rf /tmp/cups-usb /var/lib/apt/lists/*
 WORKDIR /tmp/libppd
 RUN git init && git remote add origin https://github.com/OpenPrinting/libppd.git \
     && git fetch --depth 1 origin "$LIBPPD_COMMIT" && git checkout --detach FETCH_HEAD \

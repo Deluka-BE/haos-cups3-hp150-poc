@@ -1,6 +1,6 @@
 # Experimental non-USB PoC
 
-Install only on aarch64. Version 0.1.8 downloads HP's official ULD archive during
+Install only on aarch64. Version 0.1.9 downloads HP's official ULD archive during
 image build:
 https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz
 
@@ -33,10 +33,42 @@ still needs runtime testing. See README for source links and validation limits.
 `Unable to initialize DNS-SD: Daemon not running` is still expected because no
 Avahi daemon runs. The observed service continued to listen; discovery is a
 later issue, separate from direct HTTP reachability. Use only
-the `cups:capture:/hp150` queue: the app has no USB access and cannot print to
+the `cups:capture:/hp150` queue: USB printing is disabled and the app cannot print to
 the connected printer. The TCP watchdog checks reachability only. Startup is
 manual. `/work` is container-local experimental state; export captures before
 rebuilds or removal.
+
+## Read-only USB diagnostics (0.1.9)
+
+Normal server startup reports existence and current-UID read/search access for
+`/dev/bus/usb`. It prefers `lsusb`, with a bounded sysfs fallback reading only
+bus/device numbers and vendor/product IDs. At most 32 records are logged; no
+manufacturer strings, serial attributes or raw sysfs data are dumped.
+
+A separate CUPS USB backend runs with no arguments (discovery only), followed
+by `legacy-printer-app devices` with the existing capture-only configuration.
+The build extracts only the USB backend from Debian's `cups` package into
+`/opt/poc/diagnostics/usb`; it installs no scheduler. That directory is never
+PAPPL's backend directory. Each subprocess gets an explicit credential-free
+environment, an eight-second timeout and a 32-KiB stdout limit; stderr is
+discarded. Only matching HP Color Laser 150/150a USB URIs (maximum 512 characters,
+known serial/interface parameters) are logged, never raw discovery output.
+Unrecognized or unsafe URIs are suppressed. PAPPL should report no physical HP
+URI while its allowlist remains `capture`; CUPS discovery independently shows
+any visible HP URI. No queue is created, job submitted or printer reset.
+Discovery may read USB identity descriptors; it sends no print data.
+
+`not-reported` means no accepted matching URI was found, not proof of physical
+absence. `unavailable`, `failed`, `timeout` and `output-limit` are inconclusive.
+Directory access and USB IDs alone do not prove device-node access or printing
+permission. The sysfs fallback examines at most 256 entries. Diagnostics are
+nonfatal and run only in server mode. USB printing, privileges, mounts, driver
+staging, PAPPL capture allowlist, HP filter/library/CMS and automatic QPDL
+verification remain unchanged. No evidence here justifies extra access.
+
+After rebuilding 0.1.9 on HAOS, collect only the `USB diagnostics:` lines and
+repeat the normal capture test with automatic PASS reporting. Local tests use
+synthetic discovery and cannot establish HAOS visibility or a physical HP URI.
 
 ## Security fix in 0.1.6
 

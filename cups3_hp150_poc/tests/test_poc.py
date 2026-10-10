@@ -252,6 +252,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
         source = source[:start] + source[end:]
         source = source.replace('cd /work/filter', ': # container cwd stub')
         source = source.replace('python3 /opt/poc/scripts/runtime-check.py', ': # runtime check stub')
+        source = source.replace('python3 /opt/poc/scripts/usb-diagnostics.py', ': # diagnostics tested separately')
         # Use the workspace because some workers mount /tmp with noexec.
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
             directory = Path(tmp)

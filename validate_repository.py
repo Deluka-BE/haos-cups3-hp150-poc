@@ -40,6 +40,9 @@ def main():
     entrypoint = (app / 'scripts/entrypoint.sh').read_text()
     assert 'server-port=${POC_PORT:-8631}' in entrypoint
     assert 'exec "$@"' in entrypoint
+    assert 'server) python3 /opt/poc/scripts/usb-diagnostics.py' in entrypoint
+    assert '"capture", // PoC: only the file capture backend' in dockerfile
+    assert '/opt/poc/diagnostics/usb' in dockerfile
     assert f'ARG BUILD_VERSION={config["version"]}' in dockerfile
     assert 'RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"' in dockerfile
     for label in ('version', 'type', 'arch'):
