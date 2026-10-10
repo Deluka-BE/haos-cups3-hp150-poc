@@ -60,6 +60,59 @@ class USBDiagnosticsTests(unittest.TestCase):
             self.assertIn('id=03f0:1234', out.getvalue())
             self.assertNotIn('SECRET', out.getvalue())
 
+    def test_sanitized_backend_evidence(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            usb.cups_summary('DEBUG: libusb_get_device_list=15\n'
+                'DEBUG: Failed to open device, code: -3\n'
+                'DEBUG: Failed to detach "usblp" module from 03f0:ea2a\n'
+                'DEBUG: Failed to claim interface 1 for 03f0:ea2a: SECRET\n'
+                'DEBUG2: iSerialNumber="SECRET"\nSECRET')
+        self.assertNotIn('SECRET', out.getvalue())
+        self.assertIn('evidence=open-error value=-3', out.getvalue())
+        self.assertIn('evidence=detach-failed', out.getvalue())
+        self.assertIn('evidence=claim-failed', out.getvalue())
+
+    def test_node_access_errno_and_no_device_io(self):
+        out = io.StringIO()
+        info = os.stat('/dev/null')
+        with patch.object(Path, 'stat', return_value=info), patch.object(usb.os, 'open',
+                side_effect=PermissionError(13, 'SECRET')), contextlib.redirect_stdout(out):
+            usb.hp_node_access(Path('/dev/bus/usb/001/002'))
+        self.assertIn('errno=EACCES', out.getvalue())
+        self.assertNotIn('SECRET', out.getvalue())
+        with patch.object(Path, 'stat', return_value=info), patch.object(usb.os, 'open',
+                return_value=123) as opened, patch.object(usb.os, 'close') as closed, contextlib.redirect_stdout(io.StringIO()):
+            usb.hp_node_access(Path('/dev/bus/usb/001/002'))
+        self.assertEqual(opened.call_args.args[1], os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+        closed.assert_called_once_with(123)
+
+    def test_stderr_collection_is_bounded_and_optional(self):
+        argv = [sys.executable, '-c', 'import sys; sys.stderr.write("x"*100000)']
+        self.assertEqual(usb.probe(argv), ('ok', ''))
+        status, output = usb.probe(argv, include_stderr=True)
+        self.assertEqual(status, 'output-limit')
+        self.assertLessEqual(len(output), usb.LIMIT)
+
+    def test_target_interface_numeric_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            device = root / '1-2'
+            device.mkdir()
+            (device / 'idVendor').write_text('03f0')
+            (device / 'idProduct').write_text('ea2a')
+            interface = root / '1-2:1.0'
+            interface.mkdir()
+            for name, value in {'bInterfaceNumber': '00', 'bInterfaceClass': '07',
+                                'bInterfaceSubClass': '01', 'bInterfaceProtocol': '02'}.items():
+                (interface / name).write_text(value)
+            (interface / 'driver').symlink_to('/SECRET/usblp')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                usb.hp_interfaces(root)
+            self.assertIn('class=07 subclass=01 protocol=02 driver=usblp', out.getvalue())
+            self.assertNotIn('SECRET', out.getvalue())
+
     def test_main_does_not_forward_raw_discovery(self):
         out = io.StringIO()
         uri = 'usb://HP/Color%20Laser%20150a?serial=ABC'
