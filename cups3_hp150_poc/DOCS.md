@@ -1,6 +1,6 @@
 # Experimental non-USB PoC
 
-Install only on aarch64. Version 0.1.5 downloads HP's official ULD archive during
+Install only on aarch64. Version 0.1.6 downloads HP's official ULD archive during
 image build:
 https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz
 
@@ -20,8 +20,8 @@ use `[PORT:8631]`. After updating from 0.1.4, check Configuration → Network ma
 
 The user confirmed deployed HAOS 0.1.3 was reachable at
 `http://192.168.0.3:8631/` and showed the PAPPL/CUPS page, although PAPPL logged
-`:863`. Version 0.1.4 incorrectly treated that log as a mapping failure; this
-update restores the known-good 0.1.3 ports and entrypoint validation semantics.
+`:863`. Version 0.1.4 incorrectly treated that log as a mapping failure;
+0.1.5 restored the known-good 0.1.3 ports and entrypoint validation semantics.
 Reviewed retrofit/PAPPL/CUPS sources preserve 8631 and do not prove the cause.
 The discrepancy remains diagnostic; no speculative upstream fix is applied.
 Startup logs the effective validated POC_PORT and each exact server exec argument
@@ -37,6 +37,32 @@ the `cups:capture:/hp150` queue: the app has no USB access and cannot print to
 the connected printer. The TCP watchdog checks reachability only. Startup is
 manual. `/work` is container-local experimental state; export captures before
 rebuilds or removal.
+
+## Security fix in 0.1.6
+
+HAOS 0.1.5 runtime evidence showed that PAPPL/retrofit external-backend debug
+logging exposed inherited environment variables, including Supervisor bearer
+tokens. Startup now unsets `SUPERVISOR_TOKEN` and `HASSIO_TOKEN` before every
+`legacy-printer-app` launch (server and driver enumeration), so its filters and
+backends cannot inherit either token. The PoC needs no Supervisor/Core API access.
+Debug logging remains enabled; PATH, TZ, POC_PORT and all state, spool, capture,
+filter, backend and library settings remain available. No other environment
+variables are removed because their contents and functional requirements are
+not established here; do not inject additional credentials into this PoC.
+
+The regression harness stubs driver preparation only, executes the actual shell
+launch logic with synthetic token markers, and checks both the app and a spawned
+child for token absence and required variables. It also verifies exact server
+arguments, including `server-port=8631`, and driver-listing mode. HP ULD staging,
+8631 publication and the unexplained PAPPL `:863` diagnostic remain unchanged.
+
+Treat logs collected from 0.1.5 as sensitive. Remove exposed credentials from
+shared copies and replace any exposed bearer credentials through the appropriate
+HAOS credential lifecycle. This fix prevents inheritance on entrypoint launches;
+manual `docker exec ... legacy-printer-app` bypasses the entrypoint, so sanitize
+both token variables explicitly for manual commands. Debug logs and captures can
+still contain job metadata or document content. ARM64 image rebuild and HAOS
+runtime verification of 0.1.6 remain required.
 
 The working `Deluka-BE/haos-cups-hp150` CUPS 2.4 release is separate and untouched.
 See the [repository README](https://github.com/Deluka-BE/haos-cups3-hp150-poc#readme)

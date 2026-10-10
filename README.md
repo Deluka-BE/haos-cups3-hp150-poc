@@ -96,6 +96,34 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
 
+## Security fix in 0.1.6
+
+HAOS 0.1.5 runtime evidence showed that PAPPL/retrofit external-backend debug
+logging exposed inherited environment variables, including Supervisor bearer
+tokens. Startup now unsets `SUPERVISOR_TOKEN` and `HASSIO_TOKEN` before every
+`legacy-printer-app` launch (server and driver enumeration), so its filters and
+backends cannot inherit either token. The PoC needs no Supervisor/Core API access.
+Debug logging remains enabled; PATH, TZ, POC_PORT and all state, spool, capture,
+filter, backend and library settings remain available. No other environment
+variables are removed because their contents and functional requirements are
+not established here; do not inject additional credentials into this PoC.
+
+Local 0.1.6 checks passed: all seven tests, the repository validator, three shell
+syntax checks, Python compilation and whitespace checks.
+The regression harness stubs driver preparation only, executes the actual shell
+launch logic with synthetic token markers, and checks both the app and a spawned
+child for token absence and required variables. It also verifies exact server
+arguments, including `server-port=8631`, and driver-listing mode. HP ULD staging,
+8631 publication and the unexplained PAPPL `:863` diagnostic remain unchanged.
+
+Treat logs collected from 0.1.5 as sensitive. Remove exposed credentials from
+shared copies and replace any exposed bearer credentials through the appropriate
+HAOS credential lifecycle. This fix prevents inheritance on entrypoint launches;
+manual `docker exec ... legacy-printer-app` bypasses the entrypoint, so sanitize
+both token variables explicitly for manual commands. Debug logs and captures can
+still contain job metadata or document content. ARM64 image rebuild and HAOS
+runtime verification of 0.1.6 remain required.
+
 ## Port restoration and source findings
 
 Version 0.1.4 incorrectly inferred that the 0.1.3 port mapping was broken from
@@ -144,7 +172,7 @@ HAOS runtime verification remains required: rebuild/install on ARM64, compare
 the launch diagnostics with the full PAPPL listener logs and package manifest,
 open host `:8631`, and check Open Web UI and the optional TCP watchdog. Capture
 conversion, dynamic linking and CMS lookup still need separate runtime testing.
-Local validation passed: repository/isolation checks, all six synthetic tests,
+Local 0.1.5 validation passed: repository/isolation checks, all six synthetic tests,
 three shell syntax checks, Python compilation and whitespace checks. A shell
 harness with driver preparation stubbed verified default/empty/explicit 8631,
 numeric overrides, malformed/too-large port rejection, modes, and exact
