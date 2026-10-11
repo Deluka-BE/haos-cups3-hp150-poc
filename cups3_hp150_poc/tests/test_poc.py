@@ -290,7 +290,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
                     self.assertNotIn('synthetic-hassio', result.stdout + result.stderr)
                     self.assertEqual(payload['argv'], ['drivers'] if mode == 'drivers' else
                                      ['server', '-o', 'server-port=8631', '-o',
-                                      'listen-hostname=0.0.0.0', '-o', 'log-file=-',
+                                      'server-options=no-tls', '-o', 'listen-hostname=0.0.0.0', '-o', 'log-file=-',
                                       '-o', 'log-level=debug'])
 
 

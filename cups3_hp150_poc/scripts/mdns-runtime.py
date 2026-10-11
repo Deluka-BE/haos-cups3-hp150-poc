@@ -115,6 +115,31 @@ def services(output, host, port):
     return sorted(found)[:16]
 
 
+def transport(host):
+    """Bounded observation, emit fixed fields only; no queue/job operations."""
+    output = probe(['avahi-browse', '--parsable', '--resolve', '--terminate',
+                    '--all'], timeout=3)
+    ipp = False
+    unsafe = False
+    complete = len(output.encode('utf-8')) < LIMIT and len(output.splitlines()) <= 256
+    for line in output.splitlines()[:256]:
+        fields = line.split(';', 9)
+        if len(fields) != 10 or fields[0] != '=':
+            continue
+        if fields[6].lower() != host.lower() or fields[8] != '8631':
+            continue
+        if fields[4] in ('_ipps._tcp', '_ipps-system._tcp'):
+            unsafe = True
+        if fields[4] == '_ipp._tcp':
+            ipp = True
+            if re.search(r'"TLS=[^"\r\n]*"', fields[9]):
+                unsafe = True
+    state = 'unexpected-tls' if unsafe else 'ipp-only' if ipp and complete else 'unconfirmed'
+    log(f'advertisement={state} ipps={"present" if unsafe else "not-observed"} '
+        'uri-policy=ipp-only security-policy=none port=8631')
+    return ipp and not unsafe and complete
+
+
 def stop(child):
     if child.poll() is None:
         child.terminate()
@@ -144,6 +169,9 @@ def main(argv):
         except OSError:
             log('registration=unconfirmed; browse tool unavailable')
             return 1
+        confirmed = transport(host)
+        if not confirmed:
+            names = []
         for name in names:
             log(f'registration=success service={name} hostname={host} port=8631 type=_ipp._tcp subtype=_universal pdl=image/urf URF=present')
         if not names:
@@ -219,7 +247,7 @@ def main(argv):
                     reason = diagnostics.reason(daemon) if daemon.poll() is not None else 'private-dbus-exited'
                     host = None
                     break
-                if names:
+                if names and transport(host):
                     for name in names:
                         log(f'registration=success service={name} hostname={host} port=8631 type=_ipp._tcp subtype=_universal pdl=image/urf URF=present')
                     reported = True

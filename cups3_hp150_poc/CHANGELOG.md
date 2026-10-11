@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.15
+
+- Enforce plain IPP on 8631 with `server-options=no-tls`; omit IPPS URIs/services and advertise security `none`.
+- Rebuild the matching Debian PAPPL package with guarded TLS TXT keys for Avahi and mDNSResponder.
+- Add bounded sanitized discovery diagnostics; flag unexpected local IPPS/TLS before reporting registration success.
+- Preserve 0.1.14 Avahi runtime fixes, manual queues/state, USB/capture, HP filters, supplementary GIDs, no_new_privs, token scrubbing and Protection mode. No automatic queues or jobs.
+
 ## 0.1.14
 
 - Fix Avahi runtime ownership validation by aligning its private account with UID/GID 10001; prepare only its runtime directory before privilege drop for HAOS `/run` tmpfs.

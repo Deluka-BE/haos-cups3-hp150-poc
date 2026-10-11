@@ -18,6 +18,23 @@ RECORD = '=;eth0;IPv4;hp150-usb-test;_ipp._tcp;local;hp150-poc.local;192.168.0.3
 
 
 class MDNSTests(unittest.TestCase):
+    def test_transport_rejects_tls_and_ipps_without_logging_raw_records(self):
+        for record, expected in (
+            (RECORD, True),
+            (RECORD + ' "TLS=1.2"', False),
+            (RECORD + '\n' + RECORD.replace('_ipp._tcp', '_ipps._tcp'), False),
+            (RECORD + '\n' + RECORD.replace('_ipp._tcp', '_ipps-system._tcp'), False),
+            ('', False),
+            (RECORD + '\n' + 'x' * mdns.LIMIT, False),
+            (RECORD.replace('hp150-poc.local', 'other.local'), False),
+        ):
+            output = io.StringIO()
+            with patch.object(mdns, 'probe', return_value=record + '\nSECRET'), contextlib.redirect_stdout(output):
+                self.assertEqual(mdns.transport('hp150-poc.local'), expected)
+            self.assertNotIn('SECRET', output.getvalue())
+            self.assertNotIn('192.168.0.3', output.getvalue())
+            self.assertIn('uri-policy=ipp-only security-policy=none', output.getvalue())
+
     def test_only_resolved_airprint_local_endpoint(self):
         self.assertEqual(mdns.services(RECORD + '\n' + RECORD, 'hp150-poc.local', 8631), ['hp150-usb-test'])
         for bad in (RECORD.replace('8631;', '631;'), RECORD.replace('hp150-poc.local', 'other.local'),

@@ -1,5 +1,19 @@
 # Experimental HP150 PAPPL PoC
 
+Version 0.1.15 fixes TLS selection for this credential-free PoC. Startup adds
+`server-options=no-tls`: PAPPL advertises plain IPP on **8631**, omits IPPS
+printer/system services and printer URIs, and reports `uri-security-supported=none`.
+The matching Debian PAPPL package is rebuilt with a narrowly checked patch to
+omit its otherwise unconditional `TLS=1.2` TXT key in both DNS-SD implementations.
+TLS stays disabled in this PoC; enabling it in a future release requires actual
+server credentials and a verified TLS listener before advertising IPPS/TLS.
+The 0.1.14 private Avahi ownership/hostname fix and all USB/security paths remain.
+Bounded read-only discovery diagnostics report `advertisement=ipp-only`,
+`unexpected-tls`, or `unconfirmed`, plus URI/security policy. Registration success
+requires resolved AirPrint records and no observed local IPPS/TLS advertisement.
+No startup queue creation or job submission is added. Existing container-local
+state preservation instructions below still apply when updating the app.
+
 Version 0.1.14 fixes the private Avahi startup failure in 0.1.13. Avahi's
 `make_runtime_dir()` checks the compiled-in `avahi` user/group even with
 `--no-drop-root`; 0.1.13 owned `/run/avahi-daemon` by `poc`, whose UID/GID
@@ -19,7 +33,7 @@ from the private instance with its effective hostname, LAN address, port 8631,
 No queues or jobs are created by this update. A restart with no saved manual
 queue correctly reports `registration=unconfirmed`.
 
-## AirPrint/Bonjour release 0.1.14
+## AirPrint/Bonjour release 0.1.15
 
 The user has confirmed a real test page from the 0.1.12 manual PAPPL USB queue
 on HAOS. This release repairs discovery for that proven path. Physical USB printing
@@ -50,7 +64,7 @@ added. The existing `usb: true` stays unchanged. A host-bus socket mount would
 grant broader host access; an mDNS reflector would need additional network
 infrastructure and could still advertise unusable bridge addresses.
 
-PAPPL still listens on TCP **8631** with the identical server arguments. Existing
+PAPPL still listens on TCP **8631**, now with `server-options=no-tls`. Existing
 port metadata stays for UI/watchdog compatibility, but host networking bypasses
 Docker port translation: do not change the advertised port using a Network mapping.
 The host must have no other listener on 8631. The private Avahi hostname starts
@@ -102,10 +116,10 @@ No host-shell access or container privileges are added by this release.
    Complete the state export above and leave the PoC stopped.
 2. Open **Settings → Apps/Add-ons → App/Add-on store → ⋮ → Check for updates**.
    Refresh the store if necessary. Open **HP 150 CUPS 3 Retrofit PoC (USB test)**
-   and select **Update** when **0.1.14** appears. This source-only repository
-   builds locally on ARM64; wait for successful completion. If 0.1.14 is already
+   and select **Update** when **0.1.15** appears. This source-only repository
+   builds locally on ARM64; wait for successful completion. If 0.1.15 is already
    installed but the image is stale, use its **⋮ → Rebuild** instead. Do not
-   uninstall/reinstall. Verify installed version **0.1.14**.
+   uninstall/reinstall. Verify installed version **0.1.15**.
    CLI equivalent: `ha store reload`, then `ha addons update "$POC_ADDON_SLUG"`;
    for an already installed release use `ha addons rebuild "$POC_ADDON_SLUG"`.
 3. Keep **Protection mode** enabled and startup manual. TCP 8631 is fixed under
