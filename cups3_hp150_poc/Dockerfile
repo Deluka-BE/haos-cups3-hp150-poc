@@ -58,7 +58,10 @@ s = s.replace(old, '"capture,usb", // PoC: capture and real CUPS USB backend')
 s = s.replace('PR_COPTIONS_QUERY_PS_DEFAULTS |', '/* PoC: disable device default queries */')
 p.write_text(s)
 PY
+COPY scripts/check-pappl1-compat.py /tmp/check-pappl1-compat.py
 RUN autoreconf -fi && ./configure --prefix=/usr --disable-static \
+    && python3 /tmp/check-pappl1-compat.py /tmp/retrofit \
+    && rm /tmp/check-pappl1-compat.py \
     && make -j2 && make install && ldconfig \
     && dpkg-query -W > /usr/share/hp150-package-versions.txt \
     && printf '%s\n' "$RETROFIT_COMMIT" > /usr/share/hp150-retrofit-commit.txt

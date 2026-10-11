@@ -2,6 +2,7 @@
 
 ## 0.1.17
 
+- Add a build-time PAPPL1 compatibility compile/link gate; validation-only, with no runtime behavior change.
 - Add fixed-label queue binding and USB child launch diagnostics, including argument count and normalized DEVICE_URI validity.
 - Reject invalid USB job invocation with a bounded error; retain discovery, transport, filters and 180-second deadlines without retries.
 - Remove full discovered device URIs from startup diagnostics; add binding, launch and redaction regressions.

@@ -506,3 +506,24 @@ initialization still require runtime verification.
 The 0.1.7 HAOS ARM64 capture path is user-confirmed. Rebuild 0.1.8 and verify
 automatic PASS reporting for a normal test page, retained evidence on verifier
 failure, job status and continued host Web UI access on 8631. USB stays disabled.
+
+## Staged PAPPL1 compatibility gate
+
+The Docker build now gates retrofit immediately after `./configure`, before
+`make`: `python3 /tmp/check-pappl1-compat.py /tmp/retrofit`. The gate requires
+`HAVE_PAPPL1=1` in the generated `config.h` and checks the pinned retrofit's
+existing mappings of `papplJobGetDocumentFormat(job, doc)` to
+`papplJobGetFormat(job)` and `papplJobGetDocumentFilename(job, doc)` to
+`papplJobGetFilename(job)`. Source drift fails closed for review.
+
+A temporary probe includes retrofit's actual `pappl1-private.h` and compiles and
+links both document getter calls using the generated Makefile's compiler,
+PAPPL/CUPS flags and libraries. The linked probe is never executed; it creates
+no print job. Temporary probe files are removed. Dependency pins and release
+version remain unchanged; this adds no lifecycle instrumentation.
+
+Sandbox validation: `python3 -m unittest discover -s tests -v` includes gate
+configuration/mapping rejection and build invocation tests without a compiler.
+Those tests do not establish compiler/linker compatibility. Independent host
+review, compiler validation and an ARM64 Docker build remain required before
+any release decision.
