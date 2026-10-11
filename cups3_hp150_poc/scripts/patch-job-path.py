@@ -130,6 +130,13 @@ static int pocChain(int in, int out, int seekable, cf_filter_data_t *data, void 
   papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path stage=backend-handoff finished bytes=%llu read-errno=%d", poc_bytes, bytes < 0 ? errno : 0);
   close(fd);''')
     s = s.replace("= cfFilterChain(fd,", "= pocChain(fd,").replace("cfFilterPOpen(cfFilterChain,", "cfFilterPOpen(pocChain,")
+    # Earliest safe retrofit callback entries, before 0.1.17 binding logs.
+    s = replace(s, '  job_options = papplJobCreatePrintOptions(job, 1, INT_MAX, 1);',
+                '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=spooled");\n  job_options = papplJobCreatePrintOptions(job, 1, INT_MAX, 1);')
+    s = replace(s, '  papplLogJob(job, PAPPL_LOGLEVEL_DEBUG,\n\t      "Printing job in streaming mode");',
+                '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=streaming");\n  papplLogJob(job, PAPPL_LOGLEVEL_DEBUG,\n\t      "Printing job in streaming mode");')
+    s = replace(s, '  if (!job || !device)\n    return (false);',
+                '  if (!job || !device)\n    return (false);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=raw");')
     path.write_text(s)
     path = Path(root) / 'pappl-retrofit/cups-backends.c'
     s = path.read_text()

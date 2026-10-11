@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.17
+ARG BUILD_VERSION=0.1.18
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -23,17 +23,19 @@ RUN mkdir -p /tmp/cups-usb /opt/poc/backend /opt/poc/diagnostics \
     && ln -s /opt/poc/backend/usb /opt/poc/diagnostics/usb \
     && rm -rf /tmp/cups-usb /var/lib/apt/lists/*
 # Rebuild the matching Debian PAPPL: NO_TLS must also omit the TLS TXT key.
-# Keep Debian's ABI/configuration and patch only the two DNS-SD implementations.
+# Keep Debian's ABI/configuration; guarded TLS TXT and lifecycle diagnostics only.
 COPY scripts/patch-pappl-tls.py /tmp/patch-pappl-tls.py
+COPY scripts/patch-pappl-lifecycle.py /tmp/patch-pappl-lifecycle.py
 RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends dpkg-dev \
     && apt-get build-dep -y pappl \
     && mkdir /tmp/pappl-build && cd /tmp/pappl-build \
     && apt-get source "pappl=$(dpkg-query -W -f='${source:Version}' libpappl-dev)" \
     && cd pappl-*/ && python3 /tmp/patch-pappl-tls.py pappl/dnssd.c \
+    && python3 /tmp/patch-pappl-lifecycle.py . \
     && DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -uc -us -j2 \
     && cd .. && dpkg -i ./libpappl*.deb \
-    && ldconfig && rm -rf /tmp/pappl-build /tmp/patch-pappl-tls.py /var/lib/apt/lists/*
+    && ldconfig && rm -rf /tmp/pappl-build /tmp/patch-pappl-tls.py /tmp/patch-pappl-lifecycle.py /var/lib/apt/lists/*
 WORKDIR /tmp/libppd
 RUN git init && git remote add origin https://github.com/OpenPrinting/libppd.git \
     && git fetch --depth 1 origin "$LIBPPD_COMMIT" && git checkout --detach FETCH_HEAD \

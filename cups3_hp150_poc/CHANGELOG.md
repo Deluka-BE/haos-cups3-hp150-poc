@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.18
+
+- Add fail-closed INFO lifecycle instrumentation to the existing Debian PAPPL rebuild: decoded print/create/send operations, creation results, receipt/spooling bytes, registration/hold states, submission-time scheduler snapshots, thread launch results, execution modes and first device-open/final availability results.
+- Add earliest safe retrofit callback entry markers before existing binding/backend diagnostics, plus a fixed startup marker.
+- Log only numeric values and fixed enums; avoid named queue/client prefixes and bound repeated device waits/open attempts to first-attempt and final summaries.
+- Preserve source selections, compatibility gate, transports, queue persistence and filter/backend behavior; add no retries, deadlines, state changes or automatic printing.
+- Add reviewed source-excerpt fixtures and regressions for marker presence/order, redaction and fail-closed patching. Document coverage, asynchronous ordering and intentionally omitted stages in DOCS.
+- Bump Dockerfile/config release metadata to 0.1.18. ARM64 build and live host/hardware acceptance remain independent review steps.
+
 ## 0.1.17
 
 - Add a build-time PAPPL1 compatibility compile/link gate; validation-only, with no runtime behavior change.

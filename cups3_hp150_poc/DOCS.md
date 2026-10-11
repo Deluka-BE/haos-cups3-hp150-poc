@@ -1,3 +1,86 @@
+# Release 0.1.18: lifecycle diagnostics
+
+Version **0.1.18** adds INFO `lifecycle stage=...` markers only. The existing
+Debian PAPPL **1.3.1** selection, libppd pin, retrofit commit
+`49ad525a3715a57aae24c715ef0767b55ffb1991`, PAPPL1 compatibility gate,
+AirPrint/USB/IPP/TLS policy, saved queues and filter/backend chain are retained.
+No automatic printing, retries, deadlines, document copies or persistence changes
+are introduced. PAPPL's existing device retry/wait behavior is retained.
+
+Markers cover:
+
+- `startup`: fixed release/diagnostics marker before application launch; this is
+  not proof that the application has started successfully.
+- `ipp-decoded`: numeric operation code, restricted to Print-Job (2), Create-Job
+  (5) and Send-Document (6), before request validation. No client logger is used.
+- `job-create`: begin, capacity/allocation failure or success, numeric queue ID,
+  initial job state and reason bitmask. This includes restored/internal jobs;
+  the initial held state does not imply a user-requested hold.
+- `document-receipt`: begin, fixed processing/hold-new rejection or abort;
+  `document-spool`: start, first successful write and completed byte count using
+  the existing counter. Zero-byte documents have no first-write marker. Spool
+  completion is after successful close and before submission.
+- `registered`: spooled pending/held state with reason bitmask and fixed
+  `ready|hold-new|hold-until` labels; streaming pending state before execution.
+- `scheduler-check`: one submission-time snapshot with fixed
+  `device-in-use|processing|deleted|stopped|check` labels. This is a snapshot,
+  not a definitive later scheduler outcome. `scheduler-launch` records begin and
+  thread creation success/failure on actual launches. The child can log execution
+  before the parent logs successful launch.
+- `execution`: spooled/streaming entry; `document-stream complete` records the
+  streaming cleanup state before existing job finalization, including aborts.
+  It does not claim successful printing.
+- `device-wait`: one availability-wait entry; `device-open`: first attempt begin
+  and boolean result; `device-ready`: final boolean availability with fixed
+  `available|deleted|canceled|system-stopped` reason. Reused devices have no open
+  marker. Later retry attempts emit no new markers, so repetitive waits are bounded.
+- `retrofit-entry`: earliest safe spooled, streaming and raw callback entries,
+  before the existing 0.1.17 binding and backend records. Raw entry follows the
+  existing null job/device guard. Streaming entry is in shared raster preparation.
+
+New records contain only numeric IDs/codes/states/bitmasks/bytes and fixed enum
+labels. Job logging uses PAPPL's numeric job prefix. Queue creation records use
+`papplLog` and numeric queue IDs because `papplLogPrinter` includes a queue name.
+No new record includes identity, address, URI, names, filenames, user agent,
+arbitrary attributes, environment, secrets or raw errors. Existing upstream
+logs remain unchanged and can contain sensitive data: share only sanitized
+lifecycle/path records after reviewing surrounding output.
+
+Intentionally omitted: streaming first-write and input byte totals (PAPPL's
+raster reader does not expose a counter without wrapping its I/O); per-retry
+open results and periodic scheduler defer/held enumeration (would need diagnostic
+state to bound repeated logging); per-stage elapsed time; detailed spool abort
+errno/partial byte totals; a separate wait-exit marker (final availability is
+reported by `device-ready`). No speculative interception or state fields added.
+IPP records before job creation have no job/queue association yet.
+
+Files changed: `Dockerfile` wires the guarded lifecycle patch into the existing
+Debian rebuild and bumps the version; `config.yaml` bumps the release;
+`scripts/entrypoint.sh` adds startup; `scripts/patch-pappl-lifecycle.py` adds
+PAPPL markers with all anchors checked before any source write;
+`scripts/patch-job-path.py` adds only retrofit entry logs; `tests/test_lifecycle.py`
+and six files under `tests/fixtures/lifecycle/` exercise reviewed source excerpts,
+marker presence/order, fixed-value redaction, repeat rejection and source drift;
+this document and `CHANGELOG.md` record the release. Fixtures are source excerpts,
+not runnable source or print documents. PAPPL excerpts are from Debian's
+`pappl_1.3.1.orig.tar.gz`; retrofit excerpts are from the pinned commit above.
+
+Local validation for this change: 64 unittest cases ran, 63 passed and the
+existing compiled binding-classifier regression skipped because no C compiler
+is installed. Python compilation, shell syntax and tracked/new-file whitespace
+checks passed. Both patchers applied successfully to complete reviewed original
+sources as well as the stored excerpts. No Docker executable, C toolchain,
+ARM64 runtime, HAOS host, iPhone or printer is available here; the image/package
+build, compatibility compile/link gate execution and live acceptance were not
+run. Tests use fake children/capture fixtures and submit no physical print job.
+
+Host review: review the uncommitted diff, build the ARM64 image and confirm the
+installed release/startup marker before any separately authorized manual print.
+Local tests and source patch application do not prove hardware printing or
+AirPrint operation. Do not infer a fixed stall or successful page from markers.
+
+---
+
 Version **0.1.17** also logs `path binding=cups:usb|usb|capture|other|invalid`
 at each existing job start. The USB wrapper reports the fixed executable path,
 class, argument count (excluding argv[0]), and `normalized-usb=true|false` from
@@ -44,14 +127,14 @@ stall's cause. No format conversion, queue, USB transport or backend sequencing
 fix is claimed. The new stage boundaries distinguish receipt/conversion stalls
 from vendor filtering, data handoff, backend shutdown and USB errors.
 
-### HAOS acceptance for 0.1.17
+### HAOS acceptance for 0.1.18
 
 1. Preserve the existing physical USB queue with the state export/restore procedure
    below; `/work/state` is container-local and may disappear during rebuild. Stop
    the PoC after manually draining/cancelling pending jobs. Leave the CUPS2.4 app
    untouched. Never restore spool/jobs or create/delete a queue for this upgrade.
-2. Reload the store (`ha store reload`), update this PoC to **0.1.17**, or rebuild
-   if already installed. Verify installed version 0.1.17. Keep Protection mode
+2. Reload the store (`ha store reload`), update this PoC to **0.1.18**, or rebuild
+   if already installed. Verify installed version 0.1.18. Keep Protection mode
    enabled, startup manual and port 8631. Restore only saved state with ownership
    10001 if needed, then start and verify the same queue, driver and USB URI.
 3. Verify the USB access diagnostics and the physical queue's resolved AirPrint
