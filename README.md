@@ -39,8 +39,8 @@ connected printer or the working app to try this PoC.
 The app retains the existing `/work` layout. Captures, spool and state there are
 experimental container-local data, not persistent `/data` storage or backed-up
 app configuration; export evidence before updates, rebuilds or uninstalling.
-The driver files are baked into `/hp-driver`; no app configuration or device
-mount is needed.
+The driver files are baked into `/hp-driver`. Version 0.1.11 requests raw USB
+mapping for diagnostics; no driver-directory mount or user option is needed.
 
 The previous standalone Docker layout lacked root `repository.yaml` and an app
 subdirectory with `config.yaml`. Home Assistant therefore could not recognize
@@ -96,7 +96,73 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
 
-## USB blocker diagnostics (0.1.10)
+## USB permission fix (0.1.11)
+
+HAOS 0.1.10 confirms a Unix permission failure: HP `03f0:ea2a` is visible,
+its usbfs node is `uid=0 gid=7 mode=0664`, while UID 10001 cannot read, write
+or open it (`EACCES`). CUPS reports libusb open error `-3` and no HP URI;
+interface 00 is class 07/subclass 01/protocol 02 with `usblp` attached.
+
+This release adds Home Assistant's supported
+[`usb: true` mapping](https://developers.home-assistant.io/docs/apps/configuration/)
+for `/dev/bus/usb` and its USB device policy. Mapping alone does not override
+Unix permissions. A small Python bootstrap starts as container root, removes
+both token aliases immediately, reads only bounded numeric identity/location
+fields from USB sysfs, and selects the group of the matching HP usbfs character
+node (major 189). It replaces supplementary groups with those HP node GIDs,
+sets all real/effective/saved GIDs and UIDs to 10001, enables Linux
+`no_new_privs`, then execs the existing entrypoint. Identity setup failure
+refuses launch; an absent printer still allows the capture service to start.
+GID 7 is not hardcoded, no group database is changed, root-group membership is
+never granted, and no host node is chmodded/chowned. Existing runtime checks,
+HP filter chain, token unsetting, capture verifier and port 8631 are retained.
+
+An unprivileged process cannot dynamically add a supplementary GID. This
+release therefore needs a brief root bootstrap with Docker's default SETUID
+and SETGID capabilities; the application, discovery probes, filters and backends
+run as UID 10001 with no new privileges. It requests no additional capabilities,
+`privileged` list, `full_access`, host directory mounts or Supervisor API access.
+Keep HAOS Protection mode and AppArmor enabled. The USB mapping exposes raw USB
+nodes; group membership also allows access to other mapped nodes sharing the
+HP GID. This is a group-based permission fix, not per-device isolation. The
+application still accepts only capture output and never submits a USB print
+job. CUPS discovery can claim interfaces/detach `usblp` as documented below.
+
+Connect/power on the HP before startup. If plugged in later, or its group changes,
+restart the PoC so the GID is derived again. A root-owned group, missing sysfs
+identity, changed mode, AppArmor denial or device-policy denial can still block
+access; do not disable protection or broaden permissions to mask that result.
+
+Exact next HAOS validation:
+
+1. Export any PoC captures first. Refresh this repository in the store, update
+   to **0.1.11** and let Supervisor rebuild the image and recreate the container.
+   A restart of the 0.1.10 image is insufficient. Reinstall is only needed if
+   the store does not offer the update/rebuild; verify installed version 0.1.11.
+   Keep 8631 mapped and Protection mode enabled. Leave production apps unchanged.
+2. With HP connected and idle, start the PoC. Confirm
+   `USB runtime: uid=10001 gid=10001 HP supplementary-gids=[7]` for the observed
+   node (a different numeric group is valid if the HP node uses it).
+3. Confirm `HP-node ... current-uid=10001 readable=True writable=True` and
+   `HP-node open-rw=ok (no I/O performed)`. These are the permission acceptance
+   criteria; enumeration alone is insufficient.
+4. Inspect sanitized `cups-usb evidence` and
+   `discovery=cups-usb ... HP-Color-Laser-150a=visible`, ideally followed by a
+   matching `usb://HP/Color%20Laser%20150a?...` URI. If still not reported despite
+   open success, capture detach/claim/driver-check evidence, interface descriptors
+   and discovery status for the next investigation. Do not unbind `usblp` or
+   add a physical queue in this release. URI output may contain a serial number;
+   redact that when sharing outside the hardware investigation.
+5. Confirm `USB printing disabled; PAPPL allowlist=capture`, access the Web UI at
+   `http://<HAOS-IP>:8631/`, repeat the proven `cups:capture:/hp150` capture test,
+   and confirm automatic QPDL PASS and saved capture. No physical page is expected.
+
+Local checks: 29 unit tests, repository/static checks, Python compilation, shell
+syntax and diff whitespace validation pass. No Docker/Podman, ARM64 image build
+or HAOS hardware test is available here; read/write success and discovery remain
+hardware validation targets, not claimed results.
+
+## Historical USB blocker diagnostics (0.1.10)
 
 HAOS 0.1.9 evidence establishes that USB enumeration sees `03f0:ea2a`, but
 CUPS discovery reports no accepted HP 150 URI. It does **not** establish the
@@ -268,7 +334,7 @@ Startup copies the validated files to `/work`, including the relative
 `/work/filter/cms/15xsc.cts` path, and sets `LD_LIBRARY_PATH=/work/lib`.
 Dynamic linking and actual CMS lookup still need ARM64 runtime testing.
 
-## Build and isolated non-USB smoke test
+## Build and isolated capture smoke test
 
 ```sh
 docker buildx build --platform linux/arm64 --load -t hp150-poc:phase1 cups3_hp150_poc
@@ -284,7 +350,8 @@ docker run --rm --platform linux/arm64 \
   hp150-poc:phase1 drivers
 export POC_PORT=8631
 docker run -d --name hp150-poc --platform linux/arm64 \
-  --cap-drop=ALL --security-opt=no-new-privileges \
+  --cap-drop=ALL --cap-add=SETUID --cap-add=SETGID \
+  --security-opt=no-new-privileges \
   -p "127.0.0.1:$POC_PORT:8631" \
   -v "$PWD/run-data:/work" \
   hp150-poc:phase1
@@ -426,7 +493,7 @@ on host `:8631`. The log discrepancy remains unexplained; dynamic linking during
 conversion and IPP conversion were not demonstrated. Test startup with the printer physically unplugged.
 
 Repository conversion validation: `validate_repository.py` checks YAML syntax,
-required metadata, a single app, build inputs, non-USB access settings, and Git/
+required metadata, a single app, build inputs, capture-only access settings, and Git/
 Docker exclusions for HP files. All six synthetic PoC tests, all shell syntax
 checks and `git diff --check` passed locally. Metadata was compared with the
 current Home Assistant documentation and Supervisor schema; the full Supervisor

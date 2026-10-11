@@ -26,14 +26,20 @@ def main():
     assert config['ports'] == {'8631/tcp': 8631}
     assert config['webui'] == 'http://[HOST]:[PORT:8631]/'
     assert config['watchdog'] == 'tcp://[HOST]:[PORT:8631]'
-    for key in ('usb', 'uart', 'udev', 'devices', 'privileged', 'full_access',
+    for key in ('uart', 'udev', 'devices', 'privileged', 'full_access',
                 'host_network', 'host_pid', 'host_dbus', 'gpio', 'video',
                 'docker_api', 'hassio_api', 'homeassistant_api', 'ingress'):
         assert not config.get(key), f'Forbidden access: {key}'
     assert not config.get('map'), 'The baked-in HP files must not be hidden by mounts'
     dockerfile = (app / 'Dockerfile').read_text()
     assert 'FROM debian:trixie-slim' in dockerfile
-    assert 'USER 10001:10001' in dockerfile
+    assert config.get('usb') is True
+    assert 'USER 0:0' in dockerfile
+    assert 'ENTRYPOINT ["python3", "/opt/poc/scripts/usb-runtime.py"]' in dockerfile
+    bootstrap = (app / 'scripts/usb-runtime.py').read_text()
+    assert 'os.setgroups(groups)' in bootstrap
+    assert 'os.setresuid(UID, UID, UID)' in bootstrap
+    assert 'libc.prctl(38, 1, 0, 0, 0)' in bootstrap
     assert 'cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py' in dockerfile
     assert 'ENV POC_PORT=8631\n' in dockerfile
     assert 'EXPOSE 8631\n' in dockerfile
@@ -59,7 +65,7 @@ def main():
         candidate = f'{app.name}/hp-driver/{name}'
         subprocess.run(['git', 'check-ignore', '-q', candidate], cwd=ROOT, check=True)
         assert name in (app / '.dockerignore').read_text().splitlines()
-    print('PASS: YAML, app structure, build inputs, non-USB isolation and HP exclusions')
+    print('PASS: YAML, app structure, build inputs, capture-only isolation and HP exclusions')
 
 
 if __name__ == '__main__':

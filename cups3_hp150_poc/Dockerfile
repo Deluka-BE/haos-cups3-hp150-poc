@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.10
+ARG BUILD_VERSION=0.1.11
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -56,7 +56,8 @@ RUN chmod 755 /opt/poc/scripts/* && mkdir -p /opt/poc/backend /work/state /work/
     && cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py \
     && useradd --uid 10001 --no-create-home poc && chown -R poc:poc /work \
     && rm -rf /tmp/retrofit /tmp/libppd
-USER 10001:10001
+# Only the group/identity bootstrap runs as root; no application runs before drop.
+USER 0:0
 ENV POC_PORT=8631
 EXPOSE 8631
-ENTRYPOINT ["/opt/poc/scripts/entrypoint.sh"]
+ENTRYPOINT ["python3", "/opt/poc/scripts/usb-runtime.py"]

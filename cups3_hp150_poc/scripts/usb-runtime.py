@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Resolve HP usbfs group once, then permanently enter the capture runtime."""
+import ctypes
+import os
+from itertools import islice
+from pathlib import Path
+import re
+import stat
+import sys
+
+UID = GID = 10001
+
+
+def hp_groups(sysfs=Path('/sys/bus/usb/devices'), usbfs=Path('/dev/bus/usb')):
+    groups = set()
+    try:
+        entries = list(islice(sysfs.iterdir(), 256))
+    except OSError:
+        return []
+    for device in entries:
+        try:
+            values = []
+            for name in ('idVendor', 'idProduct', 'busnum', 'devnum'):
+                with (device / name).open() as stream:
+                    values.append(stream.read(16).strip().lower())
+            if values[:2] != ['03f0', 'ea2a']:
+                continue
+            if not all(re.fullmatch(r'[0-9]{1,3}', v) and 1 <= int(v) <= 999
+                       for v in values[2:]):
+                continue
+            node = usbfs / f'{int(values[2]):03d}' / f'{int(values[3]):03d}'
+            info = node.lstat()
+            if stat.S_ISCHR(info.st_mode) and os.major(info.st_rdev) == 189:
+                # Never grant root-group membership or change host node permissions.
+                if info.st_gid != 0:
+                    groups.add(info.st_gid)
+        except (OSError, ValueError):
+            continue
+    return sorted(groups)
+
+
+def drop_privileges(groups):
+    os.setgroups(groups)
+    os.setresgid(GID, GID, GID)
+    os.setresuid(UID, UID, UID)
+    # Prevent exec from gaining privileges through setuid binaries/file caps.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
+        raise OSError(ctypes.get_errno(), 'privilege restriction failed')
+    if os.getresuid() != (UID,) * 3 or os.getresgid() != (GID,) * 3:
+        raise RuntimeError('identity restriction failed')
+
+
+def main():
+    for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
+        os.environ.pop(key, None)
+    try:
+        groups = hp_groups()
+        drop_privileges(groups)
+    except Exception:
+        print('USB runtime: identity setup failed; refusing launch', flush=True)
+        return 1
+    print(f'USB runtime: uid={UID} gid={GID} HP supplementary-gids={groups}', flush=True)
+    os.execv('/opt/poc/scripts/entrypoint.sh', ['entrypoint.sh', *sys.argv[1:]])
+
+
+if __name__ == '__main__':
+    sys.exit(main())

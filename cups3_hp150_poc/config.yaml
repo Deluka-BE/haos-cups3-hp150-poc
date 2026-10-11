@@ -1,5 +1,5 @@
 name: HP 150 CUPS 3 Retrofit PoC (non-USB)
-version: "0.1.10"
+version: "0.1.11"
 slug: cups3_hp150_poc
 description: Experimental ARM64 PAPPL retrofit with capture-only output; no USB printing.
 url: https://github.com/Deluka-BE/haos-cups3-hp150-poc
@@ -16,3 +16,5 @@ webui: http://[HOST]:[PORT:8631]/
 watchdog: tcp://[HOST]:[PORT:8631]
 options: {}
 schema: {}
+# Raw USB mapping for discovery; physical printing remains disabled.
+usb: true
