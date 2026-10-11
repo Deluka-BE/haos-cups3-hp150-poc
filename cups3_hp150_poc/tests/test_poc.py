@@ -250,6 +250,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
         start = source.index('python3 /opt/poc/scripts/validate-driver.py')
         end = source.index('export LD_LIBRARY_PATH=')
         source = source[:start] + source[end:]
+        source = source.replace('exec python3 /opt/poc/scripts/mdns-runtime.py', 'exec')
         source = source.replace('cd /work/filter', ': # container cwd stub')
         source = source.replace('python3 /opt/poc/scripts/runtime-check.py', ': # runtime check stub')
         source = source.replace('python3 /opt/poc/scripts/usb-diagnostics.py', ': # diagnostics tested separately')

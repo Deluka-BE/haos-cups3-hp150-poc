@@ -23,11 +23,12 @@ def main():
     assert config['arch'] == ['aarch64']
     assert config['stage'] == 'experimental'
     assert config['boot'] == 'manual_only'
+    assert config.get('host_network') is True
     assert config['ports'] == {'8631/tcp': 8631}
     assert config['webui'] == 'http://[HOST]:[PORT:8631]/'
     assert config['watchdog'] == 'tcp://[HOST]:[PORT:8631]'
     for key in ('uart', 'udev', 'devices', 'privileged', 'full_access',
-                'host_network', 'host_pid', 'host_dbus', 'gpio', 'video',
+                'host_pid', 'host_uts', 'host_ipc', 'host_dbus', 'gpio', 'video',
                 'docker_api', 'hassio_api', 'homeassistant_api', 'ingress'):
         assert not config.get(key), f'Forbidden access: {key}'
     assert not config.get('map'), 'The baked-in HP files must not be hidden by mounts'
@@ -41,11 +42,14 @@ def main():
     assert 'os.setresuid(UID, UID, UID)' in bootstrap
     assert 'libc.prctl(38, 1, 0, 0, 0)' in bootstrap
     assert 'cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py' in dockerfile
+    assert 'avahi-daemon avahi-utils dbus dbus-bin' in dockerfile
+    assert 'COPY mdns/ /opt/poc/mdns/' in dockerfile
+    assert 'chown poc:poc /run/avahi-daemon' in dockerfile
     assert 'ENV POC_PORT=8631\n' in dockerfile
     assert 'EXPOSE 8631\n' in dockerfile
     entrypoint = (app / 'scripts/entrypoint.sh').read_text()
     assert 'server-port=${POC_PORT:-8631}' in entrypoint
-    assert 'exec "$@"' in entrypoint
+    assert 'exec python3 /opt/poc/scripts/mdns-runtime.py "$@"' in entrypoint
     assert 'server) python3 /opt/poc/scripts/usb-diagnostics.py' in entrypoint
     assert '"capture,usb", // PoC: capture and real CUPS USB backend' in dockerfile
     assert 'cp extracted/usr/lib/cups/backend-available/usb /opt/poc/backend/usb' in dockerfile

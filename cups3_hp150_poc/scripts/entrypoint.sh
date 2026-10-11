@@ -36,6 +36,6 @@ case "${1:-server}" in
             printf 'PAPPL launch: argv[%s]=<%s>\n' "$arg_index" "$arg"
             arg_index=$((arg_index + 1))
         done
-        exec "$@" ;;
+        exec python3 /opt/poc/scripts/mdns-runtime.py "$@" ;;
     *) echo 'Allowed modes: server, drivers, validate' >&2; exit 1 ;;
 esac

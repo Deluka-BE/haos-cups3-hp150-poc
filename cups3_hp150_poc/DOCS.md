@@ -1,4 +1,184 @@
-# Experimental USB hardware-test PoC
+# Experimental HP150 PAPPL PoC
+
+## AirPrint/Bonjour release 0.1.13
+
+The user has confirmed a real test page from the 0.1.12 manual PAPPL USB queue
+on HAOS. This release adds discovery to that proven path. Physical USB printing
+is a regression gate: do not accept this release on the target until the same
+queue still prints one manually submitted test page correctly. There are no
+queue-creation, queue-deletion, migration or print-job commands in startup.
+
+### Implementation and network access
+
+PAPPL already generates each queue's IPP DNS-SD records, `_universal._sub._ipp._tcp`
+AirPrint subtype, `rp`, `pdl` and `URF` capabilities. We do not publish a static
+service that could lie about a queue or replace PAPPL's registration. Debian's
+Avahi daemon/utilities and a private D-Bus are the minimal missing runtime
+components. Both launch **after** the existing supplementary-GID/UID/GID 10001
+and `no_new_privs` bootstrap. Tokens are removed before every launch. Avahi's
+`--no-drop-root --no-chroot --no-rlimits` disables operations requiring privilege;
+it does not give it root: it already runs as `poc`. Only its container-local
+runtime directory is owned by `poc`; USB nodes are untouched.
+
+`host_network: true` is the only new HAOS access setting. The bridge and a TCP
+port publication cannot put link-local UDP 5353 multicast onto the LAN or make
+container-address records usable by an iPhone. Sharing the host network lets
+Avahi join the LAN interfaces and advertise host addresses. HAOS has no narrower
+per-port multicast-join setting. This also exposes host interfaces to this PoC;
+keep Protection mode enabled. No `privileged`, `full_access`, `host_dbus`,
+`host_pid`, `host_uts`, extra capabilities, device mappings or AppArmor bypass is
+added. The existing `usb: true` stays unchanged. A host-bus socket mount would
+grant broader host access; an mDNS reflector would need additional network
+infrastructure and could still advertise unusable bridge addresses.
+
+PAPPL still listens on TCP **8631** with the identical server arguments. Existing
+port metadata stays for UI/watchdog compatibility, but host networking bypasses
+Docker port translation: do not change the advertised port using a Network mapping.
+The host must have no other listener on 8631. The private Avahi hostname starts
+as `hp150-poc.local`; Avahi can rename it on collision, and diagnostics report
+the effective hostname. It permits coexistence with HAOS's mDNS stack, enables
+no reflector and publishes no workstation/HINFO/DNS-server records. Host Avahi
+must also permit UDP 5353 sharing; a stack that binds exclusively is a deployment
+blocker, not a reason to disable host services or grant privileges.
+
+Sources: [HAOS networking configuration](https://developers.home-assistant.io/docs/apps/configuration/),
+[PAPPL supported mDNS implementations](https://www.msweet.org/pappl/pappl.html),
+[PAPPL 1.4.6 queue registration](https://github.com/michaelrsweet/pappl/blob/v1.4.6/pappl/dnssd.c),
+[pinned retrofit AirPrint bootstrap](https://github.com/OpenPrinting/pappl-retrofit/blob/49ad525a3715a57aae24c715ef0767b55ffb1991/pappl-retrofit/pappl-retrofit.c),
+and [Avahi daemon implementation](https://github.com/avahi/avahi/blob/v0.8/avahi-daemon/main.c).
+The image records its actual Debian package versions for target verification.
+
+### Preserve existing queues before update
+
+`/work/state` remains container-local, exactly as in 0.1.12. Supervisor update or
+rebuild may replace that filesystem. A normal add-on backup of `/data` does not
+preserve it. **Export state before update if existing queues must survive.**
+Do not uninstall, delete queues, or recreate them to perform this test.
+Export `/work/capture` separately if you need its evidence. Drain/cancel any
+pending jobs manually first; do not restore spool/jobs for this release test.
+
+With an already available HAOS host/debug shell (these are host commands, not
+commands inside an ordinary SSH add-on), run `ha addons list` and find the full
+slug ending in `_cups3_hp150_poc`. Set it explicitly using the value shown:
+
+```sh
+POC_ADDON_SLUG='<full PoC slug from ha addons list>'
+ha addons stop "$POC_ADDON_SLUG"
+mkdir -p /mnt/data/hp150-poc-0.1.12-backup
+test ! -e /mnt/data/hp150-poc-0.1.12-backup/state
+docker cp -a "addon_${POC_ADDON_SLUG}:/work/state" /mnt/data/hp150-poc-0.1.12-backup/state
+docker cp -a "addon_${POC_ADDON_SLUG}:/work/capture" /mnt/data/hp150-poc-0.1.12-backup/capture
+```
+
+Verify that the exported `state` contains PAPPL's saved configuration and retain
+the exact existing queue name, driver and USB URI privately. Keep this backup
+until physical and iPhone gates pass. If host access is unavailable, obtain a
+state export before updating; a rebuild cannot be promised to preserve `/work`.
+No host-shell access or container privileges are added by this release.
+
+### Exact HAOS update/rebuild/start procedure
+
+1. Leave `haos-cups-hp150` repository, configuration and queues untouched. Ensure
+   the printer is idle and no other application submits jobs during this test.
+   Complete the state export above and leave the PoC stopped.
+2. Open **Settings → Apps/Add-ons → App/Add-on store → ⋮ → Check for updates**.
+   Refresh the store if necessary. Open **HP 150 CUPS 3 Retrofit PoC (USB test)**
+   and select **Update** when **0.1.13** appears. This source-only repository
+   builds locally on ARM64; wait for successful completion. If 0.1.13 is already
+   installed but the image is stale, use its **⋮ → Rebuild** instead. Do not
+   uninstall/reinstall. Verify installed version **0.1.13**.
+   CLI equivalent: `ha store reload`, then `ha addons update "$POC_ADDON_SLUG"`;
+   for an already installed release use `ha addons rebuild "$POC_ADDON_SLUG"`.
+3. Keep **Protection mode** enabled and startup manual. TCP 8631 is fixed under
+   host networking; no port translation setting changes it. Keep the HP connected
+   and powered on. Click **Start**, wait for the initial startup, then **Stop**
+   if the replacement container needs the saved state restored. An empty new
+   container advertises no printer queue and submits no jobs.
+4. In the existing host shell, restore the saved state into the stopped replacement
+   container, preserving its numeric ownership (10001). Do not restore spool:
+
+   ```sh
+   docker cp -a /mnt/data/hp150-poc-0.1.12-backup/state/. "addon_${POC_ADDON_SLUG}:/work/state"
+   ha addons start "$POC_ADDON_SLUG"
+   ```
+
+   If the original state survived, use it directly; no restoration is needed.
+   Confirm the existing queue's identity, driver and URI in the Web UI before
+   any submission. If it is absent or different, stop and inspect the export;
+   do not automatically create a replacement queue.
+5. Check **Logs** for unchanged USB identity/access/allowlist diagnostics,
+   `POC_PORT=<8631>`, `mDNS: private-dbus=running`, `mDNS: avahi=running` and
+   `mDNS: registration=success service=<existing USB queue name> ... port=8631`.
+   A success for only the capture queue does not prove the USB queue is advertised.
+   `Unable to initialize DNS-SD: Daemon not running` must be absent. Startup
+   waits at most 5 seconds for the private bus, 10 for Avahi, then approximately
+   30 for registration; probe output is capped at 32 KiB. It logs at most 16
+   resolved LAN service names, never raw TXT, credentials or environment dumps.
+   No queue or daemon failure triggers a print job. If mDNS fails, PAPPL remains
+   available for manual USB printing; TCP watchdog alone cannot validate AirPrint.
+6. Open `http://<HAOS-LAN-IP>:8631/`. On the **existing physical USB queue**,
+   manually submit **one Print Test Page**. Require successful job completion
+   and a readable physical page with expected colors. This must pass before
+   proceeding to iPhone. Capture QPDL PASS alone is insufficient.
+
+For a bounded read-only recheck after a manual queue change, from the existing
+host shell run (inside the running PoC as its restricted user):
+
+```sh
+docker exec --user 10001:10001 "addon_${POC_ADDON_SLUG}" python3 /opt/poc/scripts/mdns-runtime.py --diagnose
+```
+
+This uses the existing private bus, queries records for five seconds at most,
+and submits no jobs. `registration=unconfirmed` is not success; check PAPPL's
+registration logs, queue presence, AirPrint TXT fields and LAN interfaces.
+
+### Precise iPhone/iOS test
+
+1. Connect the iPhone to the same LAN/Wi-Fi segment as HAOS; avoid guest Wi-Fi,
+   client isolation and VPN routing. Open `http://<HAOS-LAN-IP>:8631/` in Safari
+   to verify IPP/HTTP reachability first.
+2. In **Files**, open a known, single-page PDF. Choose **Share → Print → Printer**
+   (or **Select Printer**). Wait up to 30 seconds. Select the name reported for
+   the **physical USB queue**, normally `hp150-usb-test`. PAPPL can also advertise
+   capture queues; selecting one produces captured output rather than a page.
+3. Set **Copies: 1** and a one-page range. Confirm the selected printer, then
+   tap **Print** once. Check **Print Center** via the app switcher while active.
+   Require successful PAPPL job completion and one correctly rendered physical
+   page; no duplicate submissions while waiting.
+4. Record release version, effective hostname/service/8631 diagnostic line,
+   iOS version, selected queue, job result and physical page result. Share only
+   sanitized logs. If discovery fails but Safari works, inspect multicast; if
+   discovery works but the job fails, inspect IPP/job/filter/backend diagnostics.
+   A failed USB regression or iPhone print is a failed deployment gate.
+
+Allow TCP 8631 and UDP 5353 multicast to `224.0.0.251` (IPv4) and `ff02::fb`
+(IPv6). Bonjour is link-local; routed VLANs require a deliberately configured
+mDNS gateway plus reachable advertised host addresses and TCP 8631. This PoC
+supplies no gateway/reflector. Firewall, AP multicast suppression, exclusive host
+mDNS bindings and IPv6 routing can prevent discovery. PAPPL's HTTP interface and
+IPP are exposed on host interfaces; use a trusted LAN. AirPrint compatibility
+is supplied by PAPPL's actual queue capabilities, not certification of this PoC.
+
+### Validation and limits
+
+The 36 local tests pass, including existing capture/USB/filter/token/GID tests
+and new bounded-probe, AirPrint record validation, credential-free daemon order,
+nonfatal daemon failure, cleanup and private D-Bus policy checks. Repository
+safety/version checks, Python compilation, shell syntax and diff whitespace pass.
+The USB bootstrap, both backends, ULD staging/wrapper and pinned source patches
+are unchanged from 0.1.12.
+
+A local non-root dependency and runtime-wrapper smoke test with `no_new_privs`
+reached Avahi RUNNING over the private
+D-Bus and registered/resolved a fixture `_ipp._tcp` service with the AirPrint
+subtype and TXT fields. It used Alpine x86_64 binaries with runtime paths/user
+relocated for this restricted workspace; it is **not** the Debian ARM64 image or
+PAPPL/HP integration. No Docker daemon or target HAOS/iPhone hardware is available
+here. The ARM64 image build, real PAPPL registration, host-stack coexistence,
+physical USB regression and iPhone print must be verified with the steps above.
+No automatic print jobs were run.
+
+
 
 ## USB hardware-test release 0.1.12
 
@@ -87,7 +267,7 @@ lines, full listener logs, host reachability, Web UI and watchdog on HAOS; colle
 the actual image/package manifest if the discrepancy persists. Capture conversion
 still needs runtime testing. See README for source links and validation limits.
 
-`Unable to initialize DNS-SD: Daemon not running` is still expected because no
+Historical pre-0.1.13: `Unable to initialize DNS-SD: Daemon not running` was expected because no
 Avahi daemon runs. The observed service continued to listen; discovery is a
 later issue, separate from direct HTTP reachability. Use the capture and separate manual USB test queues described above. The TCP watchdog checks reachability only. Startup is
 manual. `/work` is container-local experimental state; export captures before
