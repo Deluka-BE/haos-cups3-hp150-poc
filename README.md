@@ -1,5 +1,66 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.19** preserves manually configured PAPPL queues across HAOS
+add-on container restarts/replacements using `/data/state`. It also adds bounded
+startup USB discovery settling. The user confirmed physical HP USB printing with
+local PAPPL and Windows test pages on 0.1.18; the working print path is unchanged.
+No automatic queue creation or print submission is added.
+
+PAPPL reads/writes `legacy-printer-app.state` and per-printer installable-option
+configuration under `/data/state`, HAOS's persistent add-on storage. The root
+bootstrap creates/prepares only that directory (0700, UID/GID 10001); migration
+and the application run after permanent privilege drop and `no_new_privs`.
+Persistent app state always wins. If it is absent and legacy `/work/state` still
+exists, startup copies only the app state and `pNNNNN-inst-opt.conf` files (5–10
+digits), without deleting sources or replacing destinations. Migration rejects
+symlinks/nonregular files, caps enumeration at 256 entries, configuration at 64
+files, each file at 1 MiB and total at 8 MiB. All inputs are checked before copying;
+files are published atomically, with the app state last. Failures stop startup
+with a fixed sanitized error rather than launching with silently lost queues.
+
+PPDs are still regenerated at `/work/state/ppd` from the baked-in HP assets;
+filters, libraries, CMS, spool and captures keep their existing `/work` paths.
+Spool/capture data and user-uploaded PPDs are not migrated or backed up by this
+change. The supported baked-in HP PPD is regenerated on every startup. Persistent
+queue configuration does not preserve pending job documents. Drain/cancel pending
+jobs manually before upgrading. `/data` survives restart/update, but uninstalling
+can remove it; retain an add-on backup for recovery.
+
+**Upgrading from 0.1.18:** export legacy state before updating, using the historical
+host-shell export procedure below. An update that has already discarded `/work`
+cannot be recovered automatically. Restore saved configuration to `/data/state`
+in the replacement container, with owner 10001:10001 and directory mode 0700;
+never overwrite existing persistent state or restore spool/capture files. If the
+old `/work/state` is retained/restored instead, the bounded startup migration
+handles it. No export is needed for later restarts once persistent state is saved.
+
+Startup diagnostics run first, then discovery settling runs before the server.
+Each attempt invokes the existing wrapped CUPS USB backend with **no arguments**
+and retrofit `devices` mode under the final application identity. Readiness means
+a successful retrofit enumeration reports an accepted HP Color Laser 150 URI;
+raw discovery output is discarded. Up to six attempts use eight-second probes and
+2/4/8/16/16-second backoff: **142 seconds of probe/backoff budget**, in addition to
+the existing bounded startup diagnostics and normal preparation. Success exits
+early; exhaustion/failure is observable and still starts the web/capture service.
+New INFO records contain only fixed enums and bounded counters/timing. This is
+discovery-only: CUPS's existing discovery can claim interfaces, but no new reset,
+unbinding, permission change, automatic queue or job is introduced. Hotplug after
+this startup window and devices needing longer settling still require refresh.
+
+After repository reload, HAOS should offer **0.1.19** for this separate PoC.
+Hardware acceptance remains: update manually after saving state, verify the same
+queue/driver/settings, restart twice and confirm the queue remains; verify
+`persistence status=retained`, `usb-settle result=ready`, immediate Add Printer HP
+visibility, UID/GID/security policy and IPP-only mDNS. Test the disconnected-printer
+case for bounded startup and capture availability. Any physical page check must
+be explicitly submitted by the operator; this release performs none.
+
+The sections below retain historical release investigation and acceptance notes;
+0.1.19 persistence/discovery semantics above supersede their container-local state
+claims and earlier version instructions.
+
+## Historical 0.1.16 job-path diagnostics
+
 Version **0.1.16** adds bounded diagnostics for the physical job path while
 preserving 0.1.15 AirPrint/mDNS, plain IPP on 8631, USB bootstrap, capture,
 token scrubbing and Protection mode. No queues or jobs are created or deleted.
@@ -157,7 +218,7 @@ The image records its actual Debian package versions for target verification.
 
 ### Preserve existing queues before update
 
-`/work/state` remains container-local, exactly as in 0.1.12. Supervisor update or
+For releases through 0.1.18, `/work/state` was container-local, as in 0.1.12. Supervisor update or
 rebuild may replace that filesystem. A normal add-on backup of `/data` does not
 preserve it. **Export state before update if existing queues must survive.**
 Do not uninstall, delete queues, or recreate them to perform this test.
@@ -316,9 +377,9 @@ No automatic print jobs were run.
    boot is disabled. The optional watchdog checks TCP reachability only, not
    driver correctness or conversion success; enable it only after successful startup.
 
-The app retains the existing `/work` layout. Captures, spool and state there are
-experimental container-local data, not persistent `/data` storage or backed-up
-app configuration; export evidence before updates, rebuilds or uninstalling.
+From 0.1.19, saved queue/app configuration uses persistent `/data/state`.
+Generated runtime assets, captures and spool remain container-local under `/work`;
+export capture evidence separately before updates, rebuilds or uninstalling.
 The driver files are baked into `/hp-driver`. Version 0.1.12 requests raw USB
 mapping for discovery and manual test printing; no driver-directory mount or user option is needed.
 
@@ -674,22 +735,23 @@ Dynamic linking and actual CMS lookup still need ARM64 runtime testing.
 
 ```sh
 docker buildx build --platform linux/arm64 --load -t hp150-poc:phase1 cups3_hp150_poc
-mkdir -p run-data/state run-data/spool run-data/capture
+mkdir -p run-data/state run-data/spool run-data/capture run-data/data/state
+chmod 700 run-data/data/state
 # Container runs as UID/GID 10001; grant it access to this PoC directory only.
 sudo chown -R 10001:10001 run-data
 # Validate/inspect and enumerate PPDs before starting a service.
 docker run --rm --platform linux/arm64 \
-  -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" -v "$PWD/run-data/data:/data" \
   hp150-poc:phase1 validate
 docker run --rm --platform linux/arm64 \
-  -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" -v "$PWD/run-data/data:/data" \
   hp150-poc:phase1 drivers
 export POC_PORT=8631
 docker run -d --name hp150-poc --platform linux/arm64 \
   --cap-drop=ALL --cap-add=SETUID --cap-add=SETGID \
   --security-opt=no-new-privileges \
   -p "127.0.0.1:$POC_PORT:8631" \
-  -v "$PWD/run-data:/work" \
+  -v "$PWD/run-data:/work" -v "$PWD/run-data/data:/data" \
   hp150-poc:phase1
 POC_PORT="$POC_PORT" cups3_hp150_poc/scripts/smoke.sh
 docker logs --tail 200 hp150-poc

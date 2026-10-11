@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.19
+
+- Persist PAPPL app/queue and retrofit installable-option state in `/data/state`; retain generated HP PPD/runtime assets and ephemeral spool/capture paths under `/work`.
+- Prepare only the persistent state directory before the existing privilege drop; migrate recognized legacy configuration after drop with bounded reads, no symlink following, atomic no-overwrite publication and no source deletion. Existing persistent state wins; failures stop startup safely.
+- Add six bounded discovery-only startup attempts around the existing USB backend/retrofit enumeration, eight seconds per probe and 2/4/8/16/16-second backoff (142-second budget). Ready exits early; exhaustion remains observable and permits server/capture startup.
+- Keep the confirmed working physical print path, PAPPL 1.3.1/pins, capture,usb allowlist, security identity/no_new_privs, token scrubbing, mDNS and IPP-only/no-TLS unchanged. No automatic queues or print jobs, device resets or permission changes to USB nodes.
+- Add persistence/replacement/migration safety and retry state-machine regressions; update static checks, metadata, upgrade/acceptance documentation and standalone persistent mount instructions. Live HAOS/hardware acceptance remains manual.
+
 ## 0.1.18
 
 - Add fail-closed INFO lifecycle instrumentation to the existing Debian PAPPL rebuild: decoded print/create/send operations, creation results, receipt/spooling bytes, registration/hold states, submission-time scheduler snapshots, thread launch results, execution modes and first device-open/final availability results.

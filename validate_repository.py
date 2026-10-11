@@ -51,6 +51,9 @@ def main():
     assert 'server-port=${POC_PORT:-8631}' in entrypoint
     assert 'exec python3 /opt/poc/scripts/mdns-runtime.py "$@"' in entrypoint
     assert 'server) python3 /opt/poc/scripts/usb-diagnostics.py' in entrypoint
+    assert 'python3 /opt/poc/scripts/usb-settle.py' in entrypoint
+    assert 'export STATE_DIR=/data/state SPOOL_DIR=/work/spool CAPTURE_DIR=/work/capture' in entrypoint
+    assert 'python3 /opt/poc/scripts/state-runtime.py' in entrypoint
     assert '"capture,usb", // PoC: capture and real CUPS USB backend' in dockerfile
     assert 'cp extracted/usr/lib/cups/backend-available/usb /opt/poc/backend/usb' in dockerfile
     assert 'chmod 755 /opt/poc/backend/usb' in dockerfile

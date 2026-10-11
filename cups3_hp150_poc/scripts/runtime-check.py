@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 
 
-def check(root=Path('/work'), load=True):
+def check(root=Path('/work'), load=True, state=Path('/data/state')):
     for name in ('filter/rastertospl', 'filter/rastertospl.real',
                  'lib/libscmssc.so', 'share/cups/model/uld-hp/cms/15xsc.cts',
                  'state/ppd/HP_Color_Laser_15x_Series.ppd'):
@@ -16,10 +16,13 @@ def check(root=Path('/work'), load=True):
         if name.startswith('filter/') and not os.access(path, os.X_OK):
             raise RuntimeError(f'Non-executable runtime filter: {name}')
         print(f'Runtime component OK: {path}')
-    for name in ('capture', 'spool', 'state'):
+    for name in ('capture', 'spool'):
         with tempfile.TemporaryFile(dir=root / name):
             pass
         print(f'Runtime directory writable: {root / name}')
+    with tempfile.TemporaryFile(dir=state):
+        pass
+    print('INFO: persistence writable=true')
     if load:
         # dlopen checks the actual ULD library and its transitive dependencies.
         # The vendor raster filter also requires these two CUPS 2 ABI libraries.

@@ -84,6 +84,7 @@ class USBRuntimeTests(unittest.TestCase):
             self.assertNotIn('HASSIO_TOKEN', os.environ)
             return [7]
         with patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'SECRET', 'HASSIO_TOKEN': 'SECRET'}), \
+             patch.object(runtime, 'prepare_state_runtime'), \
              patch.object(runtime, 'hp_groups', side_effect=setup), \
              patch.object(runtime, 'prepare_mdns_runtime') as prepare, \
              patch.object(runtime, 'drop_privileges') as drop, \
@@ -104,7 +105,8 @@ class USBRuntimeTests(unittest.TestCase):
             chown.assert_called_once_with(paths.return_value, 10001, 10001)
 
     def test_runtime_setup_failure_preserves_usb_launch(self):
-        with patch.object(runtime, 'Path') as paths, patch.object(runtime, 'hp_groups', return_value=[7]), \
+        with patch.object(runtime, 'Path') as paths, patch.object(runtime, 'prepare_state_runtime'), \
+             patch.object(runtime, 'hp_groups', return_value=[7]), \
              patch.object(runtime, 'drop_privileges') as drop, patch.object(runtime.os, 'execv') as execute, \
              patch('builtins.print') as log:
             paths.return_value.mkdir.side_effect = PermissionError('SECRET')
@@ -114,7 +116,8 @@ class USBRuntimeTests(unittest.TestCase):
         self.assertNotIn('SECRET', str(log.call_args_list))
 
     def test_drop_failure_never_launches(self):
-        with patch.object(runtime, 'hp_groups', return_value=[]), \
+        with patch.object(runtime, 'prepare_state_runtime'), \
+             patch.object(runtime, 'hp_groups', return_value=[]), \
              patch.object(runtime, 'drop_privileges', side_effect=PermissionError('SECRET')), \
              patch.object(runtime.os, 'execv') as execute, patch('builtins.print') as log:
             self.assertEqual(runtime.main(), 1)

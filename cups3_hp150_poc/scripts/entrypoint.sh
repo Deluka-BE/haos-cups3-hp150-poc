@@ -14,7 +14,7 @@ cp /hp-driver/cms/15xsc.cts /work/share/cups/model/uld-hp/cms/
 export LD_LIBRARY_PATH=/work/lib
 export PPD_DIRS=/work/state/ppd USER_PPD_DIR=/work/state/ppd
 export FILTER_DIR=/work/filter BACKEND_DIR=/opt/poc/backend
-export STATE_DIR=/work/state SPOOL_DIR=/work/spool CAPTURE_DIR=/work/capture
+export STATE_DIR=/data/state SPOOL_DIR=/work/spool CAPTURE_DIR=/work/capture
 # ULD uses CUPS_DATADIR/model/uld-<lowercase manufacturer>/cms/<linuxIdentify>.
 cd /work/filter
 # Retrofit debug logging can expose inherited environment variables.
@@ -22,14 +22,16 @@ cd /work/filter
 # Remove both HAOS token aliases before any app launch, including drivers mode;
 # filters and backends inherit the sanitized app environment.
 unset SUPERVISOR_TOKEN HASSIO_TOKEN
+python3 /opt/poc/scripts/state-runtime.py
 python3 /opt/poc/scripts/runtime-check.py
 case "${1:-server}" in
     validate) exit 0 ;;
     drivers) exec legacy-printer-app drivers ;;
     server) python3 /opt/poc/scripts/usb-diagnostics.py
+        python3 /opt/poc/scripts/usb-settle.py
         set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
         -o server-options=no-tls -o listen-hostname=0.0.0.0 -o log-file=- -o log-level=debug
-        echo "INFO: lifecycle stage=startup version=0.1.18 diagnostics=enabled"
+        echo "INFO: lifecycle stage=startup version=0.1.19 diagnostics=enabled"
         echo "PAPPL transport: policy=ipp-only uri-security-supported=none tls=disabled port=8631 credentials=not-configured"
         # Log only the validated numeric port and these fixed, non-secret arguments.
         printf 'PAPPL launch: POC_PORT=<%s> (effective)\n' "${POC_PORT:-8631}"

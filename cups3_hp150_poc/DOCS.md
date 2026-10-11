@@ -1,4 +1,60 @@
-# Release 0.1.18: lifecycle diagnostics
+# Release 0.1.19: persistent queues and USB settling
+
+Queue loss was caused by `STATE_DIR=/work/state` on the disposable container
+filesystem. `STATE_DIR=/data/state` now covers both the PAPPL app state and
+retrofit installable-option configuration. PPD paths remain `/work/state/ppd`;
+the baked-in HP PPD and generated runtime assets keep their startup behavior.
+Spool and capture remain ephemeral. No print/filter/backend code changes.
+
+Before dropping privileges, bootstrap prepares only `/data/state`, rejects
+symlink directories and assigns 0700/10001:10001 only when needed. It never
+recursively changes `/data`. After token removal and privilege drop, migration
+retains existing persistent state; otherwise it copies only
+`legacy-printer-app.state` and `p[0-9]{5,10}-inst-opt.conf` from retained legacy
+state. Bounds: 256 directory entries, 64 files, 1 MiB/file, 8 MiB total.
+Nonregular files/symlinks fail closed. Inputs are validated before publication;
+fsynced temporary files are linked without overwrite, app state last, then the
+directory is fsynced. Sources remain intact. Interrupted partial migration can
+retry without replacing configuration. Failure prevents a misleading empty app.
+No recovery is possible from already discarded legacy state: export before the
+first upgrade and restore only configuration with owner 10001:10001. See README.
+
+USB startup was a single diagnostic snapshot despite confirmed delayed visibility.
+`usb-settle.py` now runs after existing diagnostics and before server launch under
+the final identity. Six attempts call `/opt/poc/backend/usb` without job arguments
+and retrofit `devices`, each through the existing bounded 32 KiB/eight-second
+probe. Only successful retrofit HP enumeration marks readiness. Backoff is
+2/4/8/16/16 seconds, totaling a maximum 142-second probe/backoff budget; preexisting
+diagnostics/preparation are additional. Ready stops early, exhausted or failed
+still launches the server. No retries affect printing. Discovery may claim USB
+interfaces through existing CUPS behavior; no added resets/unbinding or privilege
+changes. Late hotplug/settling beyond the bound still requires refresh.
+
+New INFO records: persistence `fresh|migrated|retained`, writable boolean,
+USB attempt 1–6, visibility `visible|unconfirmed`, fixed backoff seconds and result
+`ready|exhausted|failed`. Errors are fixed labels. No raw backend strings, device
+URIs/serials, user/queue identities, filenames, environment or credentials are
+logged by these changes. Existing upstream debug logging is unchanged.
+
+Maintenance record (0.1.19): startup state/discovery inspection against the pinned
+retrofit and PAPPL 1.3.1 source; scoped persistence bootstrap/migration, bounded
+discovery helper, regression/static checks, metadata and documentation updates.
+No AGENTS.md exists in the checkout/parent path. Independent read-only review approved the final implementation with no blockers.
+Validation: all 75 tests passed in the prepared Debian build environment (no
+skips); the host run passed with one compiler-dependent skip. The real PAPPL1
+compile/link gate passed against libpappl-dev 1.3.1-2.1 without executing its
+probe. Repository validation, Python compilation, shell syntax and diff whitespace
+checks passed. No ARM64 image build or live HAOS/hardware result is claimed. PAPPL/libppd/retrofit selections,
+allowlist capture,usb, USB mapping, UID/GID/no_new_privs, token removal, private
+mDNS and IPP-only/no-TLS remain unchanged. No HAOS install or physical print occurs.
+
+Hardware acceptance: preserve/restore old config before upgrade, verify the same
+queue and settings after two restarts/container replacement, observe bounded USB
+readiness and Add Printer visibility, test disconnected startup and capture,
+and verify IPP-only/mDNS/security regressions. Physical printing already worked
+on 0.1.18; any new page must be manually authorized/submitted by the operator.
+
+## Historical 0.1.18 lifecycle diagnostics
 
 Version **0.1.18** adds INFO `lifecycle stage=...` markers only. The existing
 Debian PAPPL **1.3.1** selection, libppd pin, retrofit commit

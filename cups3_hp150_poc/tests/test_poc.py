@@ -102,7 +102,7 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
             root = Path(tmp)
             with self.assertRaises(RuntimeError):
-                module.check(root, load=False)
+                module.check(root, load=False, state=root / 'state')
             for name in ('filter/rastertospl', 'filter/rastertospl.real', 'lib/libscmssc.so',
                          'share/cups/model/uld-hp/cms/15xsc.cts', 'state/ppd/HP_Color_Laser_15x_Series.ppd'):
                 path = root / name
@@ -111,10 +111,10 @@ class RuntimeTests(unittest.TestCase):
                 path.chmod(0o755 if name.startswith('filter/') else 0o644)
             for name in ('capture', 'spool'):
                 (root / name).mkdir()
-            module.check(root, load=False)
+            module.check(root, load=False, state=root / 'state')
             (root / 'filter/rastertospl.real').chmod(0o644)
             with self.assertRaisesRegex(RuntimeError, 'Non-executable'):
-                module.check(root, load=False)
+                module.check(root, load=False, state=root / 'state')
 
     def test_capture_verifier(self):
         import importlib.util
@@ -255,6 +255,8 @@ class LaunchEnvironmentTests(unittest.TestCase):
         source = source[:start] + source[end:]
         source = source.replace('exec python3 /opt/poc/scripts/mdns-runtime.py', 'exec')
         source = source.replace('cd /work/filter', ': # container cwd stub')
+        source = source.replace('python3 /opt/poc/scripts/state-runtime.py', ': # persistence tested separately')
+        source = source.replace('python3 /opt/poc/scripts/usb-settle.py', ': # settling tested separately')
         source = source.replace('python3 /opt/poc/scripts/runtime-check.py', ': # runtime check stub')
         source = source.replace('python3 /opt/poc/scripts/usb-diagnostics.py', ': # diagnostics tested separately')
         # Use the workspace because some workers mount /tmp with noexec.
@@ -276,7 +278,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
             expected = {key: env[key] for key in ('PATH', 'TZ', 'POC_PORT')}
             expected.update(LD_LIBRARY_PATH='/work/lib', PPD_DIRS='/work/state/ppd',
                             USER_PPD_DIR='/work/state/ppd', FILTER_DIR='/work/filter',
-                            BACKEND_DIR='/opt/poc/backend', STATE_DIR='/work/state',
+                            BACKEND_DIR='/opt/poc/backend', STATE_DIR='/data/state',
                             SPOOL_DIR='/work/spool', CAPTURE_DIR='/work/capture')
             for mode in ('server', 'drivers'):
                 with self.subTest(mode=mode):

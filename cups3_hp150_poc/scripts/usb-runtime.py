@@ -64,10 +64,27 @@ def prepare_mdns_runtime():
         print('mDNS: runtime=failed reason=directory-setup-failed', flush=True)
 
 
+def prepare_state_runtime():
+    # HAOS mounts /data freshly; own only our directory, never the mount or contents.
+    data = Path('/data')
+    if data.is_symlink() or not data.is_dir():
+        raise RuntimeError('persistent storage unavailable')
+    state = data / 'state'
+    state.mkdir(mode=0o700, exist_ok=True)
+    if state.is_symlink() or not state.is_dir():
+        raise RuntimeError('invalid persistent directory')
+    info = state.stat()
+    if (info.st_uid, info.st_gid) != (UID, GID):
+        os.chown(state, UID, GID)
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        os.chmod(state, 0o700)
+
+
 def main():
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
         os.environ.pop(key, None)
     try:
+        prepare_state_runtime()
         groups = hp_groups()
         prepare_mdns_runtime()
         drop_privileges(groups)
