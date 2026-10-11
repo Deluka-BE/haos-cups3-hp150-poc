@@ -47,8 +47,10 @@ def main():
     assert 'server-port=${POC_PORT:-8631}' in entrypoint
     assert 'exec "$@"' in entrypoint
     assert 'server) python3 /opt/poc/scripts/usb-diagnostics.py' in entrypoint
-    assert '"capture", // PoC: only the file capture backend' in dockerfile
-    assert '/opt/poc/diagnostics/usb' in dockerfile
+    assert '"capture,usb", // PoC: capture and real CUPS USB backend' in dockerfile
+    assert 'cp extracted/usr/lib/cups/backend-available/usb /opt/poc/backend/usb' in dockerfile
+    assert 'chmod 755 /opt/poc/backend/usb' in dockerfile
+    assert 'ln -s /opt/poc/backend/usb /opt/poc/diagnostics/usb' in dockerfile
     assert f'ARG BUILD_VERSION={config["version"]}' in dockerfile
     assert 'RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"' in dockerfile
     for label in ('version', 'type', 'arch'):
@@ -65,7 +67,7 @@ def main():
         candidate = f'{app.name}/hp-driver/{name}'
         subprocess.run(['git', 'check-ignore', '-q', candidate], cwd=ROOT, check=True)
         assert name in (app / '.dockerignore').read_text().splitlines()
-    print('PASS: YAML, app structure, build inputs, capture-only isolation and HP exclusions')
+    print('PASS: YAML, app structure, build inputs, capture/USB isolation and HP exclusions')
 
 
 if __name__ == '__main__':

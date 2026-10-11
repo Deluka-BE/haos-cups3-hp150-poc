@@ -18,7 +18,7 @@ export STATE_DIR=/work/state SPOOL_DIR=/work/spool CAPTURE_DIR=/work/capture
 # ULD uses CUPS_DATADIR/model/uld-<lowercase manufacturer>/cms/<linuxIdentify>.
 cd /work/filter
 # Retrofit debug logging can expose inherited environment variables.
-# This capture-only PoC needs neither Supervisor nor Core API credentials.
+# This PoC needs neither Supervisor nor Core API credentials.
 # Remove both HAOS token aliases before any app launch, including drivers mode;
 # filters and backends inherit the sanitized app environment.
 unset SUPERVISOR_TOKEN HASSIO_TOKEN

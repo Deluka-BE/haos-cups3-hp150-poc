@@ -212,7 +212,7 @@ def main():
     hp_interfaces()
     for label, argv in (
             ('cups-usb', ['/opt/poc/diagnostics/usb']),
-            ('pappl-capture-only', ['/usr/bin/legacy-printer-app', 'devices', '-o', 'log-level=error', '-o', 'log-file=-'])):
+            ('pappl-capture-usb', ['/usr/bin/legacy-printer-app', 'devices', '-o', 'log-level=error', '-o', 'log-file=-'])):
         status, output = probe(argv, include_stderr=(label == 'cups-usb'))
         if label == 'cups-usb':
             cups_summary(output)
@@ -221,7 +221,7 @@ def main():
         print(f'USB diagnostics: discovery={label} status={status} HP-Color-Laser-150a={visibility}')
         for uri in uris:
             print(f'USB diagnostics: discovery={label} device-uri={uri}')
-    print('USB diagnostics: USB printing disabled; PAPPL allowlist=capture')
+    print('USB diagnostics: USB printing available for manual queues; PAPPL allowlist=capture,usb')
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
-name: HP 150 CUPS 3 Retrofit PoC (non-USB)
-version: "0.1.11"
+name: HP 150 CUPS 3 Retrofit PoC (USB test)
+version: "0.1.12"
 slug: cups3_hp150_poc
-description: Experimental ARM64 PAPPL retrofit with capture-only output; no USB printing.
+description: Experimental ARM64 PAPPL retrofit with capture diagnostics and real USB test printing.
 url: https://github.com/Deluka-BE/haos-cups3-hp150-poc
 arch:
   - aarch64
@@ -11,10 +11,10 @@ boot: manual_only
 ports:
   8631/tcp: 8631
 ports_description:
-  8631/tcp: PAPPL HTTP interface and IPP capture service
+  8631/tcp: PAPPL HTTP interface and IPP test service
 webui: http://[HOST]:[PORT:8631]/
 watchdog: tcp://[HOST]:[PORT:8631]
 options: {}
 schema: {}
-# Raw USB mapping for discovery; physical printing remains disabled.
+# Raw USB mapping for discovery and manually selected USB test queues.
 usb: true

@@ -117,11 +117,12 @@ class USBDiagnosticsTests(unittest.TestCase):
         out = io.StringIO()
         uri = 'usb://HP/Color%20Laser%20150a?serial=ABC'
         with patch.object(usb, 'enumerate_usb'), patch.object(usb, 'probe', side_effect=[
-                ('ok', 'SECRET\ndirect ' + uri + ' "SECRET"'), ('ok', 'cups:capture:/hp150 SECRET')]) as probe, contextlib.redirect_stdout(out):
+                ('ok', 'SECRET\ndirect ' + uri + ' "SECRET"'), ('ok', 'cups:capture:/hp150 SECRET\ndirect cups:usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4 "SECRET"')]) as probe, contextlib.redirect_stdout(out):
             usb.main()
         self.assertNotIn('SECRET', out.getvalue())
         self.assertIn('device-uri=' + uri, out.getvalue())
-        self.assertIn('HP-Color-Laser-150a=not-reported', out.getvalue())
+        self.assertIn('discovery=pappl-capture-usb status=ok HP-Color-Laser-150a=visible', out.getvalue())
+        self.assertIn('device-uri=cups:usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4', out.getvalue())
         self.assertEqual(probe.call_args_list[0].args[0], ['/opt/poc/diagnostics/usb'])
         self.assertIn('devices', probe.call_args_list[1].args[0])
-        self.assertIn('USB printing disabled', out.getvalue())
+        self.assertIn('PAPPL allowlist=capture,usb', out.getvalue())

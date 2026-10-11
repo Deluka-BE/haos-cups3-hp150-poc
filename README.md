@@ -2,8 +2,8 @@
 
 **Experimental PoC, not a working printer release.** The separate working
 [CUPS 2.4 release](https://github.com/Deluka-BE/haos-cups-hp150) is untouched.
-This app only writes capture files; USB printing remains disabled. Do not change the
-connected printer or the working app to try this PoC.
+Version 0.1.12 enables manually selected USB hardware-test printing alongside
+capture diagnostics. Keep the working app and its configuration untouched.
 
 ## Install on Home Assistant OS (2026.10)
 
@@ -13,7 +13,7 @@ connected printer or the working app to try this PoC.
    `https://github.com/Deluka-BE/haos-cups3-hp150-poc`, and click **Add**.
    Close the dialog; refresh the store if needed. If the previous attempt is
    cached, remove this PoC URL and add it again.
-3. Select **HP 150 CUPS 3 Retrofit PoC (non-USB)** and click **Install**.
+3. Select **HP 150 CUPS 3 Retrofit PoC (USB test)** and click **Install**.
    Supervisor builds the Debian image locally; compiling upstream sources can
    take several minutes. This is currently offered only on aarch64.
 4. The image build downloads HP's [official ULD archive](https://ftp.hp.com/pub/softlib/software13/printers/MFP170/uld-hp_V1.00.39.12_00.15.tar.gz)
@@ -31,16 +31,16 @@ connected printer or the working app to try this PoC.
    host port. This is PAPPL's direct HTTP interface, without ingress or TLS.
    Unlike the loopback-only development command below, HAOS publishes this port
    to the host network interfaces; use it on a trusted local network.
-7. Use only the `cups:capture:/hp150` queue described below. This is not an
-   installation of CUPS 3 and does not print to the attached printer. Automatic
+7. Follow the 0.1.12 capture and separate USB queue test steps below. This is not
+   an installation of CUPS 3. Physical printing requires manual submission. Automatic
    boot is disabled. The optional watchdog checks TCP reachability only, not
    driver correctness or conversion success; enable it only after successful startup.
 
 The app retains the existing `/work` layout. Captures, spool and state there are
 experimental container-local data, not persistent `/data` storage or backed-up
 app configuration; export evidence before updates, rebuilds or uninstalling.
-The driver files are baked into `/hp-driver`. Version 0.1.11 requests raw USB
-mapping for diagnostics; no driver-directory mount or user option is needed.
+The driver files are baked into `/hp-driver`. Version 0.1.12 requests raw USB
+mapping for discovery and manual test printing; no driver-directory mount or user option is needed.
 
 The previous standalone Docker layout lacked root `repository.yaml` and an app
 subdirectory with `config.yaml`. Home Assistant therefore could not recognize
@@ -57,7 +57,7 @@ application as a driverless IPP printer.
 
 ```text
 IPP client -> PAPPL / Legacy Printer Application -> libppd / libcupsfilters2
-           -> HP rastertospl + libscmssc.so + cms/15xsc.cts -> capture file
+           -> HP rastertospl + libscmssc.so + cms/15xsc.cts -> capture file OR CUPS USB backend -> HP USB printer
 ```
 
 The working `Deluka-BE/haos-cups-hp150` CUPS 2.4 release is outside this PoC's
@@ -87,7 +87,7 @@ floating branch. This revision includes fixes after the 1.0b2 release. Review
 API/build compatibility when deliberately updating it. Build tools remain in the
 phase 1 image for diagnosis. No CUPS service, Avahi daemon, or USB device is
 started. Built-in PAPPL backends are disabled by upstream default; the Dockerfile
-also changes the Legacy application allowlist to `capture` and disables device
+also changes the Legacy application allowlist to `capture,usb` and disables device
 PostScript default queries. Only our dedicated backend directory is used.
 
 References: [upstream architecture and paths](https://github.com/OpenPrinting/pappl-retrofit),
@@ -96,7 +96,62 @@ References: [upstream architecture and paths](https://github.com/OpenPrinting/pa
 [Debian filter v2 development package](https://packages.debian.org/trixie/libcupsfilters2-dev),
 [pinned libppd](https://github.com/OpenPrinting/libppd/tree/62666f01b167bdf5975b08fbab5c2f34d9277db3).
 
-## USB permission fix (0.1.11)
+## USB hardware-test release 0.1.12
+
+Starting from user-confirmed 0.1.11 USB node access and CUPS discovery of
+`usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4`, this release installs the real
+Debian CUPS USB executable at `/opt/poc/backend/usb` (root-owned, mode 0755).
+The diagnostic path is a symlink to that same executable. Retrofit's exclusive
+allowlist is `capture,usb`; its built-in PAPPL transports stay disabled and device
+PostScript default queries stay disabled. Retrofit prefixes CUPS device URIs
+with `cups:` for selection and strips that prefix when invoking the backend.
+The HP ULD filter/CMS/QPDL pipeline and capture verifier are unchanged.
+
+Port 8631, token scrubbing, dynamic supplementary USB GIDs, UID/GID 10001 and
+no-new-privileges remain unchanged. Only `usb: true` is requested; there are no
+new mounts, privileged mode, device chmod/chown, scheduler or automatic queues/jobs.
+Discovery may claim USB interfaces; a manually submitted USB job now sends real
+print data. Historical diagnostic sections below describe earlier releases.
+
+HAOS test steps:
+
+1. Export any needed `/work/capture` evidence. Refresh **only** the
+   `haos-cups3-hp150-poc` app repository, update/rebuild to **0.1.12**, and verify
+   the installed version. Keep Protection mode enabled and `8631/tcp` → `8631`.
+   Leave the separate stable app/repository and its queues/settings untouched;
+   arrange an idle printer with no concurrent jobs for this hardware test.
+2. With the HP connected and powered on, start the PoC. Check bootstrap identity
+   and HP node access diagnostics, effective `POC_PORT=<8631>`, and
+   `PAPPL allowlist=capture,usb`. Both `cups-usb` and `pappl-capture-usb`
+   discovery should report the HP URI (the latter with `cups:`). Discovery
+   timeout/missing URI is a failed or inconclusive test, not successful transport.
+3. Open `http://<HAOS-IP>:8631/` → **Add Printer**. Confirm both the capture
+   device `cups:capture:/hp150` and HP Color Laser 150 USB device appear.
+   Its PAPPL URI must be
+   `cups:usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4`.
+   If either is missing, collect sanitized diagnostic lines and stop before printing.
+4. Keep/create `hp150-capture`, selecting the capture URI and **HP Color Laser
+   15x Series** driver. Manually use **Print Test Page**, confirm job completion,
+   the automatic QPDL `PASS` and `.spl`/`.spl.json` evidence. No physical output
+   should result from this capture queue.
+5. Manually create a **separate** `hp150-usb-test` queue with the HP USB device
+   and **HP Color Laser 15x Series** driver. Verify its URI and driver before
+   submission. Creation alone must not print. Manually submit **one Print Test
+   Page** to that queue, then inspect job status and the actual page for readable
+   content, colors and errors. Capture PASS alone cannot prove USB acceptance.
+6. Record version, both selected URIs, sanitized startup/filter/backend diagnostics,
+   job status and physical page result. If the job stalls/fails, cancel it and
+   stop the PoC before retrying; do not grant privileges or change node permissions.
+   URI serial numbers and job logs may identify devices/documents; redact when sharing.
+
+Validation: all 29 unit tests, repository safety/version checks, Python compilation,
+shell syntax and diff whitespace checks pass. The Dockerfile source patch also
+applies successfully to the pinned retrofit revision.
+
+Static checks validate wiring and regressions only. No ARM64 image build,
+HAOS startup, Add Printer interaction or physical printing is claimed locally.
+
+## USB permission fix (0.1.11; historical)
 
 HAOS 0.1.10 confirms a Unix permission failure: HP `03f0:ea2a` is visible,
 its usbfs node is `uid=0 gid=7 mode=0664`, while UID 10001 cannot read, write
@@ -493,7 +548,7 @@ on host `:8631`. The log discrepancy remains unexplained; dynamic linking during
 conversion and IPP conversion were not demonstrated. Test startup with the printer physically unplugged.
 
 Repository conversion validation: `validate_repository.py` checks YAML syntax,
-required metadata, a single app, build inputs, capture-only access settings, and Git/
+required metadata, a single app, build inputs, capture/USB access settings, and Git/
 Docker exclusions for HP files. All six synthetic PoC tests, all shell syntax
 checks and `git diff --check` passed locally. Metadata was compared with the
 current Home Assistant documentation and Supervisor schema; the full Supervisor

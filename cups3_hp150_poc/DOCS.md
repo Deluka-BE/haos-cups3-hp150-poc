@@ -1,4 +1,61 @@
-# Experimental non-USB PoC
+# Experimental USB hardware-test PoC
+
+## USB hardware-test release 0.1.12
+
+Starting from user-confirmed 0.1.11 USB node access and CUPS discovery of
+`usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4`, this release installs the real
+Debian CUPS USB executable at `/opt/poc/backend/usb` (root-owned, mode 0755).
+The diagnostic path is a symlink to that same executable. Retrofit's exclusive
+allowlist is `capture,usb`; its built-in PAPPL transports stay disabled and device
+PostScript default queries stay disabled. Retrofit prefixes CUPS device URIs
+with `cups:` for selection and strips that prefix when invoking the backend.
+The HP ULD filter/CMS/QPDL pipeline and capture verifier are unchanged.
+
+Port 8631, token scrubbing, dynamic supplementary USB GIDs, UID/GID 10001 and
+no-new-privileges remain unchanged. Only `usb: true` is requested; there are no
+new mounts, privileged mode, device chmod/chown, scheduler or automatic queues/jobs.
+Discovery may claim USB interfaces; a manually submitted USB job now sends real
+print data. Historical diagnostic sections below describe earlier releases.
+
+HAOS test steps:
+
+1. Export any needed `/work/capture` evidence. Refresh **only** the
+   `haos-cups3-hp150-poc` app repository, update/rebuild to **0.1.12**, and verify
+   the installed version. Keep Protection mode enabled and `8631/tcp` → `8631`.
+   Leave the separate stable app/repository and its queues/settings untouched;
+   arrange an idle printer with no concurrent jobs for this hardware test.
+2. With the HP connected and powered on, start the PoC. Check bootstrap identity
+   and HP node access diagnostics, effective `POC_PORT=<8631>`, and
+   `PAPPL allowlist=capture,usb`. Both `cups-usb` and `pappl-capture-usb`
+   discovery should report the HP URI (the latter with `cups:`). Discovery
+   timeout/missing URI is a failed or inconclusive test, not successful transport.
+3. Open `http://<HAOS-IP>:8631/` → **Add Printer**. Confirm both the capture
+   device `cups:capture:/hp150` and HP Color Laser 150 USB device appear.
+   Its PAPPL URI must be
+   `cups:usb://HP/Color%20Laser%20150?serial=CNB2N32ZJ4`.
+   If either is missing, collect sanitized diagnostic lines and stop before printing.
+4. Keep/create `hp150-capture`, selecting the capture URI and **HP Color Laser
+   15x Series** driver. Manually use **Print Test Page**, confirm job completion,
+   the automatic QPDL `PASS` and `.spl`/`.spl.json` evidence. No physical output
+   should result from this capture queue.
+5. Manually create a **separate** `hp150-usb-test` queue with the HP USB device
+   and **HP Color Laser 15x Series** driver. Verify its URI and driver before
+   submission. Creation alone must not print. Manually submit **one Print Test
+   Page** to that queue, then inspect job status and the actual page for readable
+   content, colors and errors. Capture PASS alone cannot prove USB acceptance.
+6. Record version, both selected URIs, sanitized startup/filter/backend diagnostics,
+   job status and physical page result. If the job stalls/fails, cancel it and
+   stop the PoC before retrying; do not grant privileges or change node permissions.
+   URI serial numbers and job logs may identify devices/documents; redact when sharing.
+
+Validation: all 29 unit tests, repository safety/version checks, Python compilation,
+shell syntax and diff whitespace checks pass. The Dockerfile source patch also
+applies successfully to the pinned retrofit revision.
+
+Static checks validate wiring and regressions only. No ARM64 image build,
+HAOS startup, Add Printer interaction or physical printing is claimed locally.
+
+
 
 Install only on aarch64. Version 0.1.10 downloads HP's official ULD archive during
 image build:
@@ -32,13 +89,11 @@ still needs runtime testing. See README for source links and validation limits.
 
 `Unable to initialize DNS-SD: Daemon not running` is still expected because no
 Avahi daemon runs. The observed service continued to listen; discovery is a
-later issue, separate from direct HTTP reachability. Use only
-the `cups:capture:/hp150` queue: USB printing is disabled and the app cannot print to
-the connected printer. The TCP watchdog checks reachability only. Startup is
+later issue, separate from direct HTTP reachability. Use the capture and separate manual USB test queues described above. The TCP watchdog checks reachability only. Startup is
 manual. `/work` is container-local experimental state; export captures before
 rebuilds or removal.
 
-## USB blocker diagnostics (0.1.10)
+## USB blocker diagnostics (0.1.10; historical)
 
 HAOS 0.1.9 evidence establishes that USB enumeration sees `03f0:ea2a`, but
 CUPS discovery reports no accepted HP 150 URI. It does **not** establish the
