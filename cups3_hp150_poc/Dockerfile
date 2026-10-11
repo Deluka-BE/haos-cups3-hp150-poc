@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.15
+ARG BUILD_VERSION=0.1.16
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -45,6 +45,8 @@ WORKDIR /tmp/retrofit
 RUN git init && git remote add origin https://github.com/OpenPrinting/pappl-retrofit.git \
     && git fetch --depth 1 origin "$RETROFIT_COMMIT" && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "$RETROFIT_COMMIT"
+COPY scripts/patch-job-path.py /tmp/patch-job-path.py
+RUN python3 /tmp/patch-job-path.py /tmp/retrofit
 # Restrict the application itself, in addition to using a separate backend directory.
 RUN python3 - <<'PY'
 from pathlib import Path
@@ -67,6 +69,8 @@ COPY tests/ /opt/poc/tests/
 RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"
 # Avahi checks its compiled-in account even with --no-drop-root.
 RUN chmod 755 /opt/poc/scripts/* && mkdir -p /opt/poc/backend /work/state /work/spool /work/capture \
+    && mv /opt/poc/backend/usb /opt/poc/backend/usb.real \
+    && cp /opt/poc/scripts/usb-wrapper.sh /opt/poc/backend/usb \
     && cp /opt/poc/scripts/capture.py /opt/poc/backend/capture \
     && cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py \
     && useradd --uid 10001 --no-create-home poc \

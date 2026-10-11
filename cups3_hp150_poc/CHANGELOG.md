@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.16
+
+- Add guarded job-path instrumentation for spooled/streaming formats, each filter, chain and backend close results, first handoff bytes, totals and errno.
+- Supervise HP filter/USB invocations with 180-second deadlines, sanitized bounded stderr, numeric exit/libusb codes, cancellation and no added retries; preserve binary streams and CUPS channels/state labels.
+- Diagnostics-only: the remaining physical stall needs HAOS hardware evidence; no speculative conversion/USB fix.
+- Preserve 0.1.15 mDNS/IPP-only, USB/security/capture and manual queues. No automatic queues or jobs.
+- Add redaction, timeout, token, stream/channel and patch-guard tests; document exact HAOS acceptance and queue preservation.
+
 ## 0.1.15
 
 - Enforce plain IPP on 8631 with `server-options=no-tls`; omit IPPS URIs/services and advertise security `none`.

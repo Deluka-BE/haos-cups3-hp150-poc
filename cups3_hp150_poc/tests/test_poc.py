@@ -231,8 +231,9 @@ class RuntimeTests(unittest.TestCase):
                             'sys.stdout.buffer.write(sys.stdin.buffer.read())\n'
                             'sys.exit(9)\n')
             real.chmod(0o755)
+            (root / 'job-stage.py').write_text((ROOT / 'scripts/job-stage.py').read_text().replace('/work', tmp))
             wrapper = root / 'wrapper.sh'
-            wrapper.write_text((ROOT / 'scripts/rastertospl-wrapper.sh').read_text().replace('/work', tmp))
+            wrapper.write_text((ROOT / 'scripts/rastertospl-wrapper.sh').read_text().replace('/work', tmp).replace('/opt/poc/scripts/job-stage.py', str(root / 'job-stage.py')))
             result = subprocess.run(['sh', str(wrapper), '7', 'SECRET', 'SECRET', '1', ''],
                                     input=b'\x00\xffSPL', capture_output=True,
                                     env={**os.environ, 'PPD': str(root / 'test.ppd'),

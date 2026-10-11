@@ -1,9 +1,78 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.16** adds bounded diagnostics for the physical job path while
+preserving 0.1.15 AirPrint/mDNS, plain IPP on 8631, USB bootstrap, capture,
+token scrubbing and Protection mode. No queues or jobs are created or deleted.
+
+The pinned retrofit has distinct spooled PDF and streaming raster paths. New
+fixed-label `path` records show job format (`urf`, `pwg-raster`, `pdf`, etc.),
+source (including native raw bypass), numbered filter stages, chain exit status, first backend write and final
+bytes handed to PAPPL's device, plus read/write errno on failure. Numbered stages
+follow conversion order; the last stage is the backend handoff. The HP filter and
+USB backend additionally report numeric job ID, invocation, exit, timeout and
+fixed vendor markers (open, claim, write, timeout, permission, busy, CMS), with
+numeric libusb codes when observed. Markers describe observed stderr terms;
+`write` or `cms` alone does not prove a failure. No new diagnostic records expose
+document bytes, titles, user names, options, USB serials, paths from clients or
+secrets. Vendor stderr is drained with bounded memory and replaced with these
+labels; known CUPS `STATE` protocol labels are preserved. Binary stdin/stdout and
+inherited CUPS back/side channels are unchanged. Capture storage is unchanged.
+
+Each HP filter/USB invocation has a **180-second wall-clock deadline**, kills its
+process group on expiry, reports failure, and adds no retries. Cancellation is
+forwarded to the child group. This bounds waits inside those executables; it is
+not a global deadline for PAPPL document receipt or all upstream conversions.
+A timeout may occur after partial physical output. Do not automatically resubmit;
+inspect printer/output and cancel pending work manually before another test.
+Native USB transport behavior, including its existing internal recovery, remains
+unchanged. Handoff bytes mean bytes delivered into the device path, not confirmed
+physical pages; backend success also needs the physical-page gate.
+
+**Diagnosis: diagnostics-only.** Source inspection confirms previously discarded
+streaming-chain and backend close statuses, but cannot prove the observed HAOS
+stall's cause. No format conversion, queue, USB transport or backend sequencing
+fix is claimed. The new stage boundaries distinguish receipt/conversion stalls
+from vendor filtering, data handoff, backend shutdown and USB errors.
+
+### HAOS acceptance for 0.1.16
+
+1. Preserve the existing physical USB queue with the state export/restore procedure
+   below; `/work/state` is container-local and may disappear during rebuild. Stop
+   the PoC after manually draining/cancelling pending jobs. Leave the CUPS2.4 app
+   untouched. Never restore spool/jobs or create/delete a queue for this upgrade.
+2. Reload the store (`ha store reload`), update this PoC to **0.1.16**, or rebuild
+   if already installed. Verify installed version 0.1.16. Keep Protection mode
+   enabled, startup manual and port 8631. Restore only saved state with ownership
+   10001 if needed, then start and verify the same queue, driver and USB URI.
+3. Verify the USB access diagnostics and the physical queue's resolved AirPrint
+   record, `advertisement=ipp-only`, security `none`, port 8631, and no TLS/IPPS.
+   Startup must not submit a job. Get-Printer-Attributes alone is not acceptance.
+4. With the printer idle, **manually** submit exactly one built-in test page to
+   that queue. Require one correct physical page and correlated job logs: spooled
+   format, all stages finish with exit 0, rastertospl exit 0, nonzero handoff bytes,
+   USB/backend exit 0, no timeout and completed job. Do not submit the iPhone test
+   while this job is pending.
+5. Manually submit one known one-page iPhone document to the same discovered
+   queue. Record its job ID and actual accepted format/source; require every
+   numbered stage to finish, HP/USB exit 0, nonzero bytes, completed job and one
+   correct physical page. `job-impressions-completed=0` plus IPP acceptance is
+   insufficient. If stalled, wait for the bounded external deadline and retain
+   sanitized `path` records and job state. Identify the last started/unfinished
+   stage; do not resubmit automatically. Remove client identity/title/URI or
+   document information from any older PAPPL debug lines before sharing logs.
+6. Optionally verify an **existing** capture queue with one manual job and its
+   capture PASS result. Do not create a queue as part of this release validation.
+
+Local verification: 51 unit tests pass, repository validation, shell syntax,
+Python compilation and whitespace checks pass. The guarded patch applies to the
+exact pinned retrofit and rejects reapplication. No ARM64 compiler/container
+runtime or HAOS USB hardware is available here; image build and physical gates
+above remain required. No print jobs were submitted during development.
+
+
 **Experimental PoC; physical USB printing is user-confirmed on HAOS.** The separate working
 [CUPS 2.4 release](https://github.com/Deluka-BE/haos-cups-hp150) is untouched.
-Version 0.1.15 fixes AirPrint TLS selection and discovery to the proven manual USB path
-while retaining capture diagnostics. Keep the working app and its configuration untouched.
+Version 0.1.16 diagnoses the physical print path after AirPrint acceptance. Keep the working app and its configuration untouched.
 
 Version 0.1.15 fixes TLS selection for this credential-free PoC. Startup adds
 `server-options=no-tls`: PAPPL advertises plain IPP on **8631**, omits IPPS
