@@ -9,9 +9,45 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 
 BUS = 'unix:path=/work/mdns/system_bus_socket'
 LIMIT = 32768
+
+
+class DaemonDiagnostics:
+    """Drain stderr continuously, retain a bounded prefix, emit only fixed reasons."""
+    def __init__(self):
+        self.data = bytearray()
+
+    def attach(self, child):
+        def drain():
+            with child.stderr:
+                while True:
+                    block = child.stderr.read(1024)
+                    if not block:
+                        break
+                    self.data.extend(block[:max(0, LIMIT - len(self.data))])
+        self.thread = threading.Thread(target=drain, daemon=True)
+        self.thread.start()
+
+    def reason(self, child):
+        if child is not None and child.poll() is not None and hasattr(self, 'thread'):
+            self.thread.join(timeout=0.2)
+        text = bytes(self.data).decode('utf-8', 'replace')
+        for marker, reason in (
+            ('Failed to create runtime directory', 'runtime-owner-mismatch'),
+            ('Failed to create PID file', 'pid-file-unwritable'),
+            ('Invalid host name', 'invalid-hostname'),
+            ('Invalid configuration', 'invalid-config'),
+            ('Failed to connect to D-Bus', 'private-dbus-connect-failed'),
+            ('Failed to acquire', 'private-dbus-name-failed'),
+            ('Address already in use', 'mdns-port-in-use'),
+            ('Permission denied', 'permission-denied'),
+        ):
+            if marker in text:
+                return reason
+        return 'daemon-exited' if child is not None and child.poll() is not None else 'startup-timeout'
 
 
 def log(message):
@@ -128,6 +164,9 @@ def main(argv):
     try:
         bus = daemon = None
         host = None
+        reason = "private-dbus-unavailable"
+        diagnostics = DaemonDiagnostics()
+        log("avahi-hostname=hp150-poc source=explicit machine-id=no")
         try:
             Path('/work/mdns').mkdir(exist_ok=True)
             # Stale private socket can remain after an abrupt container stop.
@@ -144,7 +183,8 @@ def main(argv):
             if bus_ready and not stopping:
                 daemon = subprocess.Popen(['avahi-daemon', '--no-drop-root', '--no-chroot',
                                            '--no-rlimits', '--file=/opt/poc/mdns/avahi.conf'],
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                diagnostics.attach(daemon)
                 children.append(daemon)
                 deadline = time.monotonic() + 10
                 while daemon.poll() is None and not stopping and time.monotonic() < deadline:
@@ -153,9 +193,13 @@ def main(argv):
                         if host:
                             break
                     time.sleep(0.2)
+                reason = "ready" if host else diagnostics.reason(daemon)
         except OSError:
+            reason = "private-daemon-launch-failed"
+            if bus is None:
+                log("private-dbus=failed reason=launch-unavailable")
             log("private-daemon=failed; continuing manual USB runtime")
-        log(f'avahi={"running" if host else "failed"} hostname={host or "unavailable"} port=8631 uid={os.getuid()}')
+        log(f'avahi={"running" if host else "failed"} hostname={host or "unavailable"} port=8631 uid={os.getuid()} reason={reason}')
         if stopping:
             return 0
         # mDNS failure must not take the proven USB printing path down.
@@ -171,6 +215,10 @@ def main(argv):
                 except OSError:
                     log('registration=unconfirmed; browse tool unavailable')
                     break
+                if bus.poll() is not None or daemon.poll() is not None:
+                    reason = diagnostics.reason(daemon) if daemon.poll() is not None else 'private-dbus-exited'
+                    host = None
+                    break
                 if names:
                     for name in names:
                         log(f'registration=success service={name} hostname={host} port=8631 type=_ipp._tcp subtype=_universal pdl=image/urf URF=present')
@@ -178,7 +226,8 @@ def main(argv):
                     break
                 time.sleep(0.5)
         if not reported:
-            log('registration=unconfirmed port=8631; daemon failure, no manual queue, or missing AirPrint records; no job submitted')
+            registration_reason = reason if not host else 'no-resolved-manual-airprint-queue'
+            log(f'registration=unconfirmed port=8631 reason={registration_reason}; no job submitted')
         # Supervise without restarting PAPPL or altering queues/jobs.
         failed = False
         while app.poll() is None and not stopping:

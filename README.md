@@ -2,13 +2,32 @@
 
 **Experimental PoC; physical USB printing is user-confirmed on HAOS.** The separate working
 [CUPS 2.4 release](https://github.com/Deluka-BE/haos-cups-hp150) is untouched.
-Version 0.1.13 adds AirPrint/Bonjour discovery to the proven manual USB path
+Version 0.1.14 fixes AirPrint/Bonjour discovery to the proven manual USB path
 while retaining capture diagnostics. Keep the working app and its configuration untouched.
 
-## AirPrint/Bonjour release 0.1.13
+Version 0.1.14 fixes the private Avahi startup failure in 0.1.13. Avahi's
+`make_runtime_dir()` checks the compiled-in `avahi` user/group even with
+`--no-drop-root`; 0.1.13 owned `/run/avahi-daemon` by `poc`, whose UID/GID
+were different. Its attempted chown failed after the privilege drop and its
+ownership check aborted startup before D-Bus hostname queries could work.
+`hostname=unavailable` was a consequence, not an invalid HAOS hostname.
+
+The private image now gives the Avahi account the same numeric UID/GID 10001
+as `poc`. Bootstrap prepares only `/run/avahi-daemon` for a fresh `/run` tmpfs
+before dropping privileges; discovery setup failure still permits USB startup.
+The existing explicit `hp150-poc` hostname additionally disables machine-ID
+selection. Host networking, private D-Bus and UDP 5353 coexistence are unchanged.
+Bounded stderr collection emits fixed sanitized failure reasons, never raw output.
+Registration success still requires resolved `_ipp._tcp` AirPrint subtype records
+from the private instance with its effective hostname, LAN address, port 8631,
+`rp`, `image/urf` and `URF`; both private processes must still be alive.
+No queues or jobs are created by this update. A restart with no saved manual
+queue correctly reports `registration=unconfirmed`.
+
+## AirPrint/Bonjour release 0.1.14
 
 The user has confirmed a real test page from the 0.1.12 manual PAPPL USB queue
-on HAOS. This release adds discovery to that proven path. Physical USB printing
+on HAOS. This release repairs discovery for that proven path. Physical USB printing
 is a regression gate: do not accept this release on the target until the same
 queue still prints one manually submitted test page correctly. There are no
 queue-creation, queue-deletion, migration or print-job commands in startup.
@@ -88,10 +107,10 @@ No host-shell access or container privileges are added by this release.
    Complete the state export above and leave the PoC stopped.
 2. Open **Settings → Apps/Add-ons → App/Add-on store → ⋮ → Check for updates**.
    Refresh the store if necessary. Open **HP 150 CUPS 3 Retrofit PoC (USB test)**
-   and select **Update** when **0.1.13** appears. This source-only repository
-   builds locally on ARM64; wait for successful completion. If 0.1.13 is already
+   and select **Update** when **0.1.14** appears. This source-only repository
+   builds locally on ARM64; wait for successful completion. If 0.1.14 is already
    installed but the image is stale, use its **⋮ → Rebuild** instead. Do not
-   uninstall/reinstall. Verify installed version **0.1.13**.
+   uninstall/reinstall. Verify installed version **0.1.14**.
    CLI equivalent: `ha store reload`, then `ha addons update "$POC_ADDON_SLUG"`;
    for an already installed release use `ha addons rebuild "$POC_ADDON_SLUG"`.
 3. Keep **Protection mode** enabled and startup manual. TCP 8631 is fixed under
@@ -202,14 +221,14 @@ No automatic print jobs were run.
    pass during the build and again at startup. The EULA is available in the
    image at `/usr/share/doc/hp150-uld/eula.txt`; review HP's license before use
    or redistribution. Proprietary files are never committed to Git.
-5. Keep **Protection mode** enabled. Version 0.1.13 uses host networking;
+5. Keep **Protection mode** enabled. Version 0.1.14 uses host networking;
    TCP 8631 must be free and cannot be translated using a port mapping.
 6. Click **Start**, then inspect **Logs** for driver validation and service startup.
    Click **Open Web UI**, or visit `http://<HAOS-IP>:8631/` using the configured
    host port. This is PAPPL's direct HTTP interface, without ingress or TLS.
    Unlike the loopback-only development command below, HAOS publishes this port
    to the host network interfaces; use it on a trusted local network.
-7. Follow the 0.1.13 regression and iPhone test steps above. This is not
+7. Follow the 0.1.14 regression and iPhone test steps above. This is not
    an installation of CUPS 3. Physical printing requires manual submission. Automatic
    boot is disabled. The optional watchdog checks TCP reachability only, not
    driver correctness or conversion success; enable it only after successful startup.

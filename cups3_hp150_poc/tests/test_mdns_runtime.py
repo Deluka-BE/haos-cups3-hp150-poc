@@ -36,7 +36,7 @@ class MDNSTests(unittest.TestCase):
 
     def test_start_order_credentials_registration_and_cleanup(self):
         bus = Mock(poll=Mock(return_value=None))
-        daemon = Mock(poll=Mock(return_value=None))
+        daemon = Mock(poll=Mock(return_value=None), stderr=io.BytesIO())
         app = Mock(poll=Mock(side_effect=[None, 0]), wait=Mock(return_value=0))
         launches = []
         def launch(argv, **kwargs):
@@ -71,6 +71,25 @@ class MDNSTests(unittest.TestCase):
         self.assertIn('registration=unconfirmed', output.getvalue())
         self.assertNotIn('SECRET', output.getvalue())
 
+    def test_crashed_avahi_reports_reason_and_keeps_usb_running(self):
+        bus = Mock(poll=Mock(return_value=None))
+        daemon = Mock(poll=Mock(return_value=1), stderr=io.BytesIO(
+            b'Failed to create runtime directory /run/avahi-daemon. SECRET'))
+        app = Mock(poll=Mock(return_value=0), wait=Mock(return_value=0))
+        output = io.StringIO()
+        with patch.object(mdns, 'Path') as paths, \
+             patch.object(mdns.subprocess, 'Popen', side_effect=[bus, daemon, app]), \
+             patch.object(mdns.signal, 'signal'), patch.object(mdns, 'stop'), \
+             patch.object(mdns, 'probe') as probe, contextlib.redirect_stdout(output):
+            paths.return_value.exists.return_value = True
+            self.assertEqual(mdns.main(['legacy-printer-app', 'server']), 0)
+        probe.assert_not_called()
+        self.assertIn('avahi=failed', output.getvalue())
+        self.assertIn('reason=runtime-owner-mismatch', output.getvalue())
+        self.assertIn('registration=unconfirmed', output.getvalue())
+        self.assertNotIn('registration=success', output.getvalue())
+        self.assertNotIn('SECRET', output.getvalue())
+
     def test_cleanup_kills_unresponsive_child(self):
         child = Mock(poll=Mock(return_value=None), wait=Mock(side_effect=[subprocess.TimeoutExpired('fixture', 3), 0]))
         mdns.stop(child)
@@ -86,6 +105,31 @@ class MDNSTests(unittest.TestCase):
         paths.assert_not_called()
         for record in (RECORD.replace('eth0;', 'lo;'), RECORD.replace('192.168.0.3', '127.0.0.1')):
             self.assertEqual(mdns.services(record, 'hp150-poc.local', 8631), [])
+
+    def test_explicit_hostname_and_avahi_account_match_runtime(self):
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(ROOT / 'mdns/avahi.conf')
+        self.assertEqual(config['server']['host-name'], 'hp150-poc')
+        self.assertEqual(config['server']['host-name-from-machine-id'], 'no')
+        self.assertEqual(config['server']['disallow-other-stacks'], 'no')
+        docker = (ROOT / 'Dockerfile').read_text()
+        self.assertIn('usermod --non-unique --uid 10001 --gid poc avahi', docker)
+        self.assertIn('groupmod --non-unique --gid 10001 avahi', docker)
+
+    def test_daemon_reason_is_bounded_and_sanitized(self):
+        diagnostics = mdns.DaemonDiagnostics()
+        child = subprocess.Popen([sys.executable, '-c',
+            'import sys; sys.stderr.write("Failed to create runtime directory SECRET\\n" + "x"*100000)'],
+            stderr=subprocess.PIPE)
+        diagnostics.attach(child)
+        child.wait(timeout=3)
+        deadline = time.monotonic() + 2
+        while len(diagnostics.data) < mdns.LIMIT and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertLessEqual(len(diagnostics.data), mdns.LIMIT)
+        self.assertEqual(diagnostics.reason(child), 'runtime-owner-mismatch')
+        self.assertNotIn('SECRET', diagnostics.reason(child))
 
     def test_private_bus_has_reply_signal_and_connection_policy(self):
         import xml.etree.ElementTree as ET

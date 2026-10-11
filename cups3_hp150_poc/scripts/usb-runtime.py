@@ -51,11 +51,25 @@ def drop_privileges(groups):
         raise RuntimeError('identity restriction failed')
 
 
+def prepare_mdns_runtime():
+    # /run can be a fresh tmpfs on HAOS. Prepare only this private path.
+    try:
+        runtime = Path('/run/avahi-daemon')
+        runtime.mkdir(mode=0o755, exist_ok=True)
+        if runtime.is_symlink() or not runtime.is_dir():
+            raise RuntimeError('invalid Avahi runtime directory')
+        os.chown(runtime, UID, GID)
+    except (OSError, RuntimeError):
+        # A discovery setup failure must not disable USB printing.
+        print('mDNS: runtime=failed reason=directory-setup-failed', flush=True)
+
+
 def main():
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
         os.environ.pop(key, None)
     try:
         groups = hp_groups()
+        prepare_mdns_runtime()
         drop_privileges(groups)
     except Exception:
         print('USB runtime: identity setup failed; refusing launch', flush=True)

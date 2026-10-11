@@ -85,6 +85,7 @@ class USBRuntimeTests(unittest.TestCase):
             return [7]
         with patch.dict(os.environ, {'SUPERVISOR_TOKEN': 'SECRET', 'HASSIO_TOKEN': 'SECRET'}), \
              patch.object(runtime, 'hp_groups', side_effect=setup), \
+             patch.object(runtime, 'prepare_mdns_runtime') as prepare, \
              patch.object(runtime, 'drop_privileges') as drop, \
              patch.object(runtime.os, 'execv') as execute, \
              patch.object(runtime.sys, 'argv', ['usb-runtime.py', 'drivers']), \
@@ -92,6 +93,25 @@ class USBRuntimeTests(unittest.TestCase):
             runtime.main()
         drop.assert_called_once_with([7])
         execute.assert_called_once_with('/opt/poc/scripts/entrypoint.sh', ['entrypoint.sh', 'drivers'])
+
+    def test_fresh_runtime_dir_has_only_scoped_ownership(self):
+        with patch.object(runtime, 'Path') as paths, patch.object(runtime.os, 'chown') as chown:
+            paths.return_value.is_symlink.return_value = False
+            paths.return_value.is_dir.return_value = True
+            runtime.prepare_mdns_runtime()
+            paths.assert_called_once_with('/run/avahi-daemon')
+            paths.return_value.mkdir.assert_called_once_with(mode=0o755, exist_ok=True)
+            chown.assert_called_once_with(paths.return_value, 10001, 10001)
+
+    def test_runtime_setup_failure_preserves_usb_launch(self):
+        with patch.object(runtime, 'Path') as paths, patch.object(runtime, 'hp_groups', return_value=[7]), \
+             patch.object(runtime, 'drop_privileges') as drop, patch.object(runtime.os, 'execv') as execute, \
+             patch('builtins.print') as log:
+            paths.return_value.mkdir.side_effect = PermissionError('SECRET')
+            runtime.main()
+        drop.assert_called_once_with([7])
+        execute.assert_called_once()
+        self.assertNotIn('SECRET', str(log.call_args_list))
 
     def test_drop_failure_never_launches(self):
         with patch.object(runtime, 'hp_groups', return_value=[]), \
