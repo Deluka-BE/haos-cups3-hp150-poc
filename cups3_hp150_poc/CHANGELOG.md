@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.17
+
+- Add fixed-label queue binding and USB child launch diagnostics, including argument count and normalized DEVICE_URI validity.
+- Reject invalid USB job invocation with a bounded error; retain discovery, transport, filters and 180-second deadlines without retries.
+- Remove full discovered device URIs from startup diagnostics; add binding, launch and redaction regressions.
+
 ## 0.1.16
 
 - Add guarded job-path instrumentation for spooled/streaming formats, each filter, chain and backend close results, first handoff bytes, totals and errno.

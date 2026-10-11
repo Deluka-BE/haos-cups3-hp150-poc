@@ -220,7 +220,7 @@ def main():
         visibility = 'visible' if uris else ('not-reported' if status == 'ok' else 'inconclusive')
         print(f'USB diagnostics: discovery={label} status={status} HP-Color-Laser-150a={visibility}')
         for uri in uris:
-            print(f'USB diagnostics: discovery={label} device-uri={uri}')
+            print(f'USB diagnostics: discovery={label} binding={"cups:usb" if uri.startswith("cups:usb:") else "usb"}')
     print('USB diagnostics: USB printing available for manual queues; PAPPL allowlist=capture,usb')
 
 

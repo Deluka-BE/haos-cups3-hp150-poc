@@ -188,7 +188,8 @@ class RuntimeTests(unittest.TestCase):
                                     env={**os.environ, 'CAPTURE_DIR': tmp, 'DEVICE_URI': 'capture:/hp150'},
                                     capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(len(result.stderr.splitlines()), 1)
+            self.assertEqual(len(result.stderr.splitlines()), 2)
+            self.assertIn(b'path=/opt/poc/backend/capture class=capture argc=5 normalized-usb=false device-uri=capture', result.stderr)
             self.assertIn(b'PASS: capture job=8', result.stderr)
             self.assertNotIn(b'SECRET', result.stderr)
             self.assertIn('cp /opt/poc/scripts/verify-capture.py /opt/poc/backend/verify-capture.py',
@@ -205,7 +206,8 @@ class RuntimeTests(unittest.TestCase):
                                     env={**os.environ, 'CAPTURE_DIR': tmp, 'DEVICE_URI': 'capture:/hp150'},
                                     capture_output=True)
             self.assertEqual(result.returncode, 1)
-            self.assertEqual(len(result.stderr.splitlines()), 1)
+            self.assertEqual(len(result.stderr.splitlines()), 2)
+            self.assertIn(b'path=/opt/poc/backend/capture class=capture argc=5 normalized-usb=false device-uri=capture', result.stderr)
             self.assertIn(b'FAIL: capture job=9', result.stderr)
             self.assertNotIn(b'SECRET', result.stderr)
             path = next(Path(tmp).glob('*.spl'))

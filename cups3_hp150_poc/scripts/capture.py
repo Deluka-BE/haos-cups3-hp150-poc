@@ -50,6 +50,10 @@ def main(argv):
         print('direct capture:/hp150 "HP Color Laser 150 capture" "HP150 file capture" '
               '"MFG:HP;MDL:HP Color Laser 15x Series;CMD:SPLC;"')
         return 0
+    print(f'INFO: path stage=capture launch path=/opt/poc/backend/capture class=capture '
+          f'argc={len(argv) - 1} normalized-usb=false '
+          f'device-uri={"capture" if os.environ.get("DEVICE_URI") == "capture:/hp150" else "invalid"}',
+          file=sys.stderr, flush=True)
     if (len(argv) not in (6, 7) or os.environ.get('DEVICE_URI') != 'capture:/hp150'
             or not argv[1].isascii() or not argv[1].isdigit()):
         print('ERROR: invalid capture invocation/URI/job id', file=sys.stderr)

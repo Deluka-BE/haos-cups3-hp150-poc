@@ -1,6 +1,16 @@
+Version **0.1.17** also logs `path binding=cups:usb|usb|capture|other|invalid`
+at each existing job start. The USB wrapper reports the fixed executable path,
+class, argument count (excluding argv[0]), and `normalized-usb=true|false` from
+the actual child environment before launching the real backend. Invalid URI,
+argument count or job ID yields `reason=invalid-usb-invocation` without launch
+or retry. Discovery logs binding classes instead of full device URIs. No URI,
+serial, options or client identity is included in these records. A `usb` queue
+binding may use PAPPL's native transport, so absence of a CUPS USB launch record
+is useful evidence. Queue persistence remains outside this release.
+
 # Experimental HP150 PAPPL PoC
 
-Version **0.1.16** adds bounded diagnostics for the physical job path while
+Version **0.1.17** adds bounded diagnostics for the physical job path while
 preserving 0.1.15 AirPrint/mDNS, plain IPP on 8631, USB bootstrap, capture,
 token scrubbing and Protection mode. No queues or jobs are created or deleted.
 
@@ -34,14 +44,14 @@ stall's cause. No format conversion, queue, USB transport or backend sequencing
 fix is claimed. The new stage boundaries distinguish receipt/conversion stalls
 from vendor filtering, data handoff, backend shutdown and USB errors.
 
-### HAOS acceptance for 0.1.16
+### HAOS acceptance for 0.1.17
 
 1. Preserve the existing physical USB queue with the state export/restore procedure
    below; `/work/state` is container-local and may disappear during rebuild. Stop
    the PoC after manually draining/cancelling pending jobs. Leave the CUPS2.4 app
    untouched. Never restore spool/jobs or create/delete a queue for this upgrade.
-2. Reload the store (`ha store reload`), update this PoC to **0.1.16**, or rebuild
-   if already installed. Verify installed version 0.1.16. Keep Protection mode
+2. Reload the store (`ha store reload`), update this PoC to **0.1.17**, or rebuild
+   if already installed. Verify installed version 0.1.17. Keep Protection mode
    enabled, startup manual and port 8631. Restore only saved state with ownership
    10001 if needed, then start and verify the same queue, driver and USB URI.
 3. Verify the USB access diagnostics and the physical queue's resolved AirPrint

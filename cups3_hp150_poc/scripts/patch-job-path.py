@@ -29,6 +29,24 @@ static const char *pocFormat(pappl_job_t *job)
 
 '''
     helper += r"""
+static const char *pocBinding(const char *uri)
+{
+  if (!uri || !*uri) return "invalid";
+  for (const unsigned char *p = (const unsigned char *)uri; *p; p++)
+    if (*p <= 32 || *p == 127) return "invalid";
+  if (!strncmp(uri, "cups:usb://", 11) && uri[11]) return "cups:usb";
+  if (!strncmp(uri, "usb://", 6) && uri[6]) return "usb";
+  if (!strncmp(uri, "usb:", 4) || !strncmp(uri, "cups:usb:", 9)) return "invalid";
+  if (!strcmp(uri, "capture:/hp150") || !strcmp(uri, "cups:capture:/hp150")) return "capture";
+  return strchr(uri, ':') ? "other" : "invalid";
+}
+static void pocLogBinding(pappl_job_t *job)
+{
+  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path binding=%s",
+    pocBinding(papplPrinterGetDeviceURI(papplJobGetPrinter(job))));
+}
+"""
+    helper += r"""
 typedef struct { cf_filter_filter_in_chain_t original; int index; } poc_stage_t;
 static int pocStage(int in, int out, int seekable, cf_filter_data_t *data, void *params)
 {
@@ -63,9 +81,9 @@ static int pocChain(int in, int out, int seekable, cf_filter_data_t *data, void 
 """
     s = replace(s, '//\n// \'_prASCII85()\'', helper + '//\n// \'_prASCII85()\'')
     s = replace(s, '  informat = papplJobGetDocumentFormat(job, 1);\n  papplLogJob',
-                '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=spooled", pocFormat(job));\n  informat = papplJobGetDocumentFormat(job, 1);\n  papplLogJob')
+                '  pocLogBinding(job);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=spooled", pocFormat(job));\n  informat = papplJobGetDocumentFormat(job, 1);\n  papplLogJob')
     s = replace(s, '  // Load PPD file and determine the PPD options equivalent to the job options\n  job_data = _prCreateJobData(job, options);\n  papplLogJob',
-                '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=streaming", pocFormat(job));\n  // Load PPD file and determine the PPD options equivalent to the job options\n  job_data = _prCreateJobData(job, options);\n  papplLogJob')
+                '  pocLogBinding(job);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=streaming", pocFormat(job));\n  // Load PPD file and determine the PPD options equivalent to the job options\n  job_data = _prCreateJobData(job, options);\n  papplLogJob')
     s = replace(s, '  if (cfFilterChain(fd, nullfd, 1, job_data->filter_data, job_data->chain) == 0)\n    ret = true;',
                 '''  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path stage=filter-chain started source=spooled");
   int poc_result = cfFilterChain(fd, nullfd, 1, job_data->filter_data, job_data->chain);
@@ -98,7 +116,7 @@ static int pocChain(int in, int out, int seekable, cf_filter_data_t *data, void 
     s = replace(s, '  bool                  ret = true;          // Return value',
                 '  unsigned long long poc_bytes = 0;\n  bool                  ret = true;          // Return value')
     s = replace(s, '  papplJobSetImpressions(job, 1);\n\n  if ((fd = open(papplJobGetDocumentFilename(job, 1), O_RDONLY)) < 0)',
-                '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=raw filter-chain=bypassed", pocFormat(job));\n  papplJobSetImpressions(job, 1);\n\n  if ((fd = open(papplJobGetDocumentFilename(job, 1), O_RDONLY)) < 0)')
+                '  pocLogBinding(job);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "path accepted format=%s source=raw filter-chain=bypassed", pocFormat(job));\n  papplJobSetImpressions(job, 1);\n\n  if ((fd = open(papplJobGetDocumentFilename(job, 1), O_RDONLY)) < 0)')
     s = replace(s, '      close(fd);\n      ret = false;\n      goto cleanup;\n    }\n  }\n  close(fd);',
                 '''      papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "path stage=backend-handoff failed errno=%d bytes=%llu", errno, poc_bytes);
       close(fd);

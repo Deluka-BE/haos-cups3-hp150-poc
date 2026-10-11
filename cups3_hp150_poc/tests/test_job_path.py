@@ -84,3 +84,65 @@ class JobPathTests(unittest.TestCase):
         source = (ROOT / 'scripts/patch-job-path.py').read_text()
         for label in ('source=streaming', 'source=spooled', 'first-write', 'read-errno', 'filter-%d finished', 'cups-backend finished'):
             self.assertIn(label, source)
+
+
+class BindingLaunchTests(unittest.TestCase):
+    def invoke(self, uri, args):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {'DEVICE_URI': uri}), patch.object(sys, 'argv', ['job-stage.py', 'usb', *args]), patch.object(stage, 'supervise', return_value=0) as child, contextlib.redirect_stderr(io.StringIO()) as log:
+            result = stage.main()
+        return result, log.getvalue(), child
+
+    def test_normalized_child_launch_and_redaction(self):
+        uri = 'usb://HP/Printer?serial=SERIAL_SECRET'
+        args = ['42', 'CLIENT_SECRET', 'TITLE_SECRET', '1', 'OPTIONS_SECRET']
+        result, log, child = self.invoke(uri, args)
+        self.assertEqual(result, 0)
+        child.assert_called_once_with('usb', ['/opt/poc/backend/usb.real', *args], '42')
+        self.assertIn('path=/opt/poc/backend/usb.real class=usb argc=5 device-uri=usb normalized-usb=true', log)
+        for secret in [uri, *args[1:3], args[4], 'SERIAL_SECRET']:
+            self.assertNotIn(secret, log)
+        self.assertTrue(stage.valid_usb_uri(uri))
+
+    def test_invalid_invocations_do_not_launch(self):
+        valid = ['42', 'CLIENT_SECRET', 'TITLE_SECRET', '1', 'OPTIONS_SECRET']
+        cases = [(uri, valid) for uri in ('', 'usb:', 'usb://', 'cups:usb://HP/SECRET', 'capture:/hp150', 'usb://HP/SECRET\n', 'usb://HP/SECRET\x7f')]
+        cases += [('usb://HP/SECRET', valid[:4]), ('usb://HP/SECRET', valid + ['FILE_SECRET', 'EXTRA_SECRET']), ('usb://HP/SECRET', ['CLIENT_SECRET', *valid[1:]])]
+        for uri, args in cases:
+            with self.subTest(uri=uri, argc=len(args)):
+                result, log, child = self.invoke(uri, args)
+                self.assertEqual(result, 1)
+                child.assert_not_called()
+                self.assertIn('rejected reason=invalid-usb-invocation retry=none', log)
+                self.assertNotIn('SECRET', log)
+                self.assertLess(len(log), 350)
+
+    def test_optional_filename_is_preserved_without_logging(self):
+        result, log, child = self.invoke('usb://HP/Printer', ['42', 'CLIENT', 'TITLE', '1', 'OPTIONS', 'FILE_SECRET'])
+        self.assertEqual(result, 0)
+        self.assertIn('argc=6', log)
+        self.assertNotIn('FILE_SECRET', log)
+        self.assertEqual(child.call_args.args[1][-1], 'FILE_SECRET')
+
+    def test_binding_classifier_compiled_from_patch(self):
+        # Execute the actual injected C helper, independent of PAPPL or hardware.
+        import shutil
+        import ast
+        compiler = shutil.which('cc') or shutil.which('gcc')
+        if not compiler:
+            self.skipTest('C compiler required for binding regression')
+        tree = ast.parse((ROOT / 'scripts/patch-job-path.py').read_text())
+        helpers = [node.value.value for node in ast.walk(tree) if isinstance(node, ast.AugAssign) and isinstance(node.value, ast.Constant) and 'static const char *pocBinding' in str(node.value.value)]
+        helper = helpers[0].split('static void pocLogBinding')[0]
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            source = Path(tmp) / 'binding.c'
+            binary = Path(tmp) / 'binding'
+            source.write_text('#include <stdio.h>\n#include <string.h>\n' + helper + '\nint main(int argc, char **argv) { puts(pocBinding(argc > 1 ? argv[1] : NULL)); return 0; }\n')
+            subprocess.run([compiler, '-Wall', '-Wextra', '-Werror', str(source), '-o', str(binary)], check=True, capture_output=True)
+            cases = {None: 'invalid', '': 'invalid', 'broken': 'invalid', 'usb://': 'invalid', 'cups:usb://HP/P?serial=SECRET': 'cups:usb', 'usb://HP/P?serial=SECRET': 'usb', 'capture:/hp150': 'capture', 'cups:capture:/hp150': 'capture', 'https://CLIENT:SECRET@host': 'other', 'usb://HP/SECRET\n': 'invalid'}
+            for uri, expected in cases.items():
+                result = subprocess.run([str(binary)] + ([] if uri is None else [uri]), check=True, capture_output=True, text=True)
+                self.assertEqual(result.stdout.strip(), expected)
+                self.assertNotIn('SECRET', result.stdout)
+        patch_source = (ROOT / 'scripts/patch-job-path.py').read_text()
+        self.assertEqual(patch_source.count('  pocLogBinding(job);'), 3)

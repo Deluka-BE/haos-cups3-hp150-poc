@@ -92,6 +92,12 @@ def supervise(stage, command, job, timeout=180):
     return 1 if timed_out or result < 0 else result
 
 
+def valid_usb_uri(uri):
+    # Classification only: no parsing result or input is ever printed.
+    return (uri.startswith('usb://') and len(uri) > 6
+            and not any(ord(char) <= 32 or ord(char) == 127 for char in uri))
+
+
 def main():
     stage = sys.argv[1]
     args = sys.argv[2:]
@@ -103,6 +109,15 @@ def main():
         os.environ.pop('HASSIO_TOKEN', None)
         os.execv(executable, ['usb', *args])
     job = args[0] if args and args[0].isascii() and args[0].isdigit() and len(args[0]) <= 10 else 'unknown'
+    if stage == 'usb':
+        valid_uri = valid_usb_uri(os.environ.get('DEVICE_URI', ''))
+        print(f'INFO: path job={job} stage=usb launch path=/opt/poc/backend/usb.real '
+              f'class=usb argc={len(args)} device-uri={"usb" if valid_uri else "invalid"} '
+              f'normalized-usb={str(valid_uri).lower()}', file=sys.stderr, flush=True)
+        if len(args) not in (5, 6) or job == 'unknown' or not valid_uri:
+            print(f'ERROR: path job={job} stage=usb rejected reason=invalid-usb-invocation retry=none',
+                  file=sys.stderr, flush=True)
+            return 1
     return supervise(stage, [executable, *args], job)
 
 
