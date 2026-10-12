@@ -21,6 +21,8 @@ def main():
     assert re.fullmatch(r'[a-z0-9_]+', config['slug'])
     assert config['slug'] == app.name
     assert config['arch'] == ['aarch64']
+    assert config['options'] == {'log_level': 'info'}
+    assert config['schema'] == {'log_level': 'list(fatal|error|warn|info|debug)'}
     assert config['stage'] == 'experimental'
     assert config['boot'] == 'manual_only'
     assert config.get('host_network') is True

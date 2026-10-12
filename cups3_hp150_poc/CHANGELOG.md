@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.21
+
+- Add validated `log_level` add-on option with PAPPL 1.3.1 supported values fatal/error/warn/info/debug; default info retains lifecycle markers and suppresses DEBUG polling.
+- Pass the allowlisted value as a single server option, retaining log-file=-; fail safely on invalid/malformed options without input disclosure.
+- Preserve all 0.1.20 print/runtime behavior and pins; add option/schema, rejection, argument and lifecycle regressions. No HAOS install or physical print.
+
 ## 0.1.20
 
 - Diagnostics-only: bracket IPP acceptance/data presence, effective format, streaming/spooled selection, processing/device availability, raster open/first header, options and callback dispatch, spool close/submit.

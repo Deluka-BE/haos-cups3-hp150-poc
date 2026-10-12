@@ -253,6 +253,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
         start = source.index('python3 /opt/poc/scripts/validate-driver.py')
         end = source.index('export LD_LIBRARY_PATH=')
         source = source[:start] + source[end:]
+        source = source.replace('/opt/poc/scripts/log-level.py', str(ROOT / 'scripts/log-level.py'))
         source = source.replace('exec python3 /opt/poc/scripts/mdns-runtime.py', 'exec')
         source = source.replace('cd /work/filter', ': # container cwd stub')
         source = source.replace('python3 /opt/poc/scripts/state-runtime.py', ': # persistence tested separately')
@@ -272,7 +273,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
                            'print(json.dumps({"argv": sys.argv[1:], '
                            '"app": dict(os.environ), "child": json.loads(child)}))\n')
             app.chmod(0o755)
-            env = {'PATH': tmp + os.pathsep + os.defpath, 'TZ': 'UTC',
+            env = {'PATH': tmp + os.pathsep + str(Path(sys.executable).parent) + os.pathsep + os.defpath, 'TZ': 'UTC',
                    'POC_PORT': '8631', 'SUPERVISOR_TOKEN': 'synthetic-supervisor',
                    'HASSIO_TOKEN': 'synthetic-hassio'}
             expected = {key: env[key] for key in ('PATH', 'TZ', 'POC_PORT')}
@@ -296,7 +297,7 @@ class LaunchEnvironmentTests(unittest.TestCase):
                     self.assertEqual(payload['argv'], ['drivers'] if mode == 'drivers' else
                                      ['server', '-o', 'server-port=8631', '-o',
                                       'server-options=no-tls', '-o', 'listen-hostname=0.0.0.0', '-o', 'log-file=-',
-                                      '-o', 'log-level=debug'])
+                                      '-o', 'log-level=info'])
 
 
 class ValidationTests(unittest.TestCase):

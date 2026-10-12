@@ -1,5 +1,9 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.21** exposes the PAPPL server `log_level` add-on option, defaulting
+to `info` to retain lifecycle diagnostics and suppress DEBUG polling. Supported
+values: `fatal`, `error`, `warn`, `info`, `debug`. See [logging configuration](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.20** is a diagnostics-only candidate for the unproven iPhone
 pre-retrofit stall. It adds sanitized INFO boundaries without changing print
 behavior or creating automatic jobs. See [release diagnostics and manual validation](cups3_hp150_poc/DOCS.md).

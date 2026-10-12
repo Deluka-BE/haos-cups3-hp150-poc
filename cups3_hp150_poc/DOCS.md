@@ -1,3 +1,35 @@
+# Release 0.1.21: configurable PAPPL server logging
+
+Set the add-on option `log_level` to `fatal`, `error`, `warn`, `info` or
+`debug`. The default is `info`: current INFO lifecycle markers remain visible,
+while PAPPL DEBUG polling is suppressed. Higher thresholds hide INFO markers;
+select `debug` only when needed. This controls PAPPL server logging, not fixed
+startup, filter/backend or private daemon diagnostics.
+
+Verified against installed PAPPL 1.3.1 and its `pappl/mainloop-subcommands.c`
+`log-level` parser: these five lowercase spellings are the supported values.
+Pinned retrofit `49ad525a3715a57aae24c715ef0767b55ffb1991` delegates to
+`papplMainloop` and uses that parser. No `warning`, `trace` or `none` alias is
+exposed. `/data/options.json` is read after privilege drop; a missing file/key
+uses `info` for standalone containers and upgrades. Invalid values, malformed
+JSON, non-object options and unreadable files stop server startup with a fixed
+error before driver staging or server launch. Input contents are never logged.
+
+The selected allowlisted value is passed as one quoted `-o log-level=<value>`
+argument; `log-file=-` remains unchanged. No shell evaluation or output filtering
+is added. All 0.1.20 print behavior, AirPrint/IPP, USB/filter/backend chain,
+persistence, security, mDNS, PAPPL1 compatibility and source pins are preserved.
+No HAOS install or physical print is part of this release validation.
+
+Maintenance record (2026-10-12, 0.1.21): host suite 86 tests passed (two
+build-environment skips); isolated Debian suite all 86 passed, including the
+PAPPL1 compile/link gate. The explicit configured retrofit compatibility gate,
+`validate_repository.py`, Python compilation, all shell syntax checks and
+`git diff --check` passed. Installed PAPPL reports 1.3.1 and the retrofit checkout
+matches the unchanged pin. No HAOS install or physical print was performed.
+The central maintenance log was not available in this workspace; this repository
+record contains no secrets.
+
 # Release 0.1.20: diagnostics-only pre-retrofit boundaries
 
 This candidate preserves working 0.1.19 print behavior. No cause of the iPhone
