@@ -1,5 +1,9 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.20** is a diagnostics-only candidate for the unproven iPhone
+pre-retrofit stall. It adds sanitized INFO boundaries without changing print
+behavior or creating automatic jobs. See [release diagnostics and manual validation](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.19** preserves manually configured PAPPL queues across HAOS
 add-on container restarts/replacements using `/data/state`. It also adds bounded
 startup USB discovery settling. The user confirmed physical HP USB printing with
@@ -47,7 +51,7 @@ discovery-only: CUPS's existing discovery can claim interfaces, but no new reset
 unbinding, permission change, automatic queue or job is introduced. Hotplug after
 this startup window and devices needing longer settling still require refresh.
 
-After repository reload, HAOS should offer **0.1.19** for this separate PoC.
+After repository reload, HAOS should offer **0.1.20** for this separate PoC.
 Hardware acceptance remains: update manually after saving state, verify the same
 queue/driver/settings, restart twice and confirm the queue remains; verify
 `persistence status=retained`, `usb-settle result=ready`, immediate Add Printer HP

@@ -1,3 +1,83 @@
+# Release 0.1.20: diagnostics-only pre-retrofit boundaries
+
+This candidate preserves working 0.1.19 print behavior. No cause of the iPhone
+processing/job-printing stall with zero impressions has been proven. The added
+INFO records locate a stop before retrofit dispatch; they do not fix one.
+No automatic jobs, new queues, retries, deadlines, reads or scheduling changes.
+PAPPL 1.3.1, retrofit/libppd pins, advertising, security, persistence, device/USB
+handling, submission, transport and filter/backend chain remain unchanged.
+
+The existing fail-closed PAPPL patch now validates every exact-source anchor and
+the absence of its generated header before writing any source. The header contains
+only fixed-label metadata helpers and an errno-preserving INFO macro. There is no
+read-observation wrapper: raster-open and first-header boundaries suffice to locate
+which original call is blocked. No per-read/page diagnostics are added.
+
+Added marker names and locations (all `lifecycle stage=`):
+
+| Stage | Location / values |
+| --- | --- |
+| `ipp-submission begin` | Decoded Print-Job/Create-Job/Send-Document, before validation; request id, fixed operation, supplied format and compression |
+| `ipp-last-document` | Send-Document only at decode; present/valid/value booleans, invalid value logged as 0 |
+| `ipp-data begin/result` | Existing document-presence probe; begin before original httpPeek, result present boolean; non-receive state emits result=0 without a peek |
+| `ipp-submission returned` | After operation returns, before trailing-data flush/HTTP response; response job id, request id, fixed operation and status class |
+| `document-effective` | Accepted document receipt before streaming/spooling selection; request id, operation, effective job format; existing papplLogJob prefix supplies job id |
+| `document-branch` | Before raster dispatch or spool file creation; streaming-raster/spooled-non-raster |
+| `processing-set` | Immediately after original processing state assignment |
+| `device-availability begin/result` | Before existing availability check / after wait, before existing open loop; in-use boolean, available/unavailable/deleted/canceled |
+| `raster-open begin/result` | Around original cupsRasterOpenIO; success/error |
+| `raster-first-header begin/result` | Around original first cupsRasterReadHeader; success/error |
+| `print-options begin/result` | Around first streaming and raw PAPPL options creation; streaming/raw and nonnull boolean |
+| `print-dispatch begin/returned` | Immediately around original filter, printfile or rstartjob callback; fixed callback enum and returned success boolean |
+| `document-receive result` | After existing spool read loop; eof/error, before close |
+| `spool-close begin/result` | Before existing close, failure branch or successful close; success/error |
+| `spool-submit begin/returned` | Around original file submission; returned means function returned, not that printing completed |
+
+Existing `document-receipt`, `document-spool`, `registered`, `scheduler-check`,
+`scheduler-launch`, `execution`, `device-wait`, first-attempt `device-open`,
+`device-ready`, `document-stream`, and `retrofit-entry` markers remain. After a
+failed first open, `device-ready` distinguishes eventual availability from exit;
+there is no added device retry logging or retry behavior. Filter callback options
+are created inside retrofit, whose existing entry marker precedes that work.
+
+Formats: pdf, urf, pwg-raster, jpeg, png, postscript, octet-stream, other, unknown.
+Compression: none, gzip, deflate, compress, other, unknown. Absent/mistyped supplied
+metadata is unknown. These are labels, not MIME/compression acceptance rules.
+Status class: success, other, client-error, server-error. Numeric correlation is
+bounded to 0..INT_MAX; 0 means unavailable/nonpositive. Job-prefixed logs use the
+existing numeric PAPPL job prefix. No new names, URIs, identity, title, filenames,
+attributes, document contents, user-agent or raw errors are logged. Existing
+upstream logs are unchanged. An acceptance/result line alone does not prove a
+successful print, and a missing return line identifies a boundary, not a cause.
+
+Manual HAOS validation (operator only; not performed during repository work):
+restart the addon to clear the log, begin saving the full log before submission,
+submit exactly one iPhone print, and save through stall or completion. Locate
+request/job correlation, then the last begin/result pair through device readiness,
+raster open, first header, options, callback and existing retrofit/filter/backend
+markers. Record job state and impressions. If possible repeat separately with one
+known-good Windows job and compare paths. A blocked open/header call may reflect
+partial or interrupted input; an error/cancel path should retain original ordering.
+Do not submit automatic diagnostics jobs. Redact existing upstream identifiers and
+secrets before sharing logs; retain the original full log locally.
+
+Maintenance record (0.1.20): reviewed pristine PAPPL 1.3.1 source from the existing
+Debian source archive; extended only the existing diagnostics patch, source excerpts,
+regression tests, version metadata and release documentation. No AGENTS.md exists
+in the checkout or applicable parent path. No stable CUPS2.4 repository touched.
+Validation: all 81 tests passed in the prepared Debian environment (no skips),
+including six new boundary tests and all 75 existing tests. Host: 81 tests, two
+compiler-dependent skips. Final pristine PAPPL 1.3.1 with both repository patches
+configured and built successfully; only existing unrelated upstream/compiler and
+make jobserver warnings were observed. The PAPPL1 compile/link gate passed with
+the candidate library on the compiler search path; its probe was not executed.
+Repository validator, Python compilation, five shell syntax checks and git diff
+whitespace checks passed. A temporary executable probe was placed inside the
+repository because the prepared environment's /tmp is noexec; it used synthetic
+metadata and read-return stubs, never real jobs or device IO. Build/test logs stay
+in ignored run-data. No HAOS installation, physical print, ARM64 image build or
+live-runtime diagnosis is claimed.
+
 # Release 0.1.19: persistent queues and USB settling
 
 Queue loss was caused by `STATE_DIR=/work/state` on the disposable container

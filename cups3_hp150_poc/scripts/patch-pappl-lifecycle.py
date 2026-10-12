@@ -138,8 +138,154 @@ RULES = {'client-ipp.c': [('  op    = ippGetOperation(client->request);',
                     '  finish_job(job);\n'
                     '  return;')]}
 
+
+# 0.1.20: additive boundaries only; no extra reads, clocks, retries or callbacks.
+HEADER = r"""/* Diagnostics only. All labels are literals; preserve errno across logging. */
+#ifndef POC_BOUNDARIES_H
+#define POC_BOUNDARIES_H
+#include <errno.h>
+#define POC_INFO(logger, object, ...) do { int poc_saved_errno = errno; \
+  logger(object, PAPPL_LOGLEVEL_INFO, __VA_ARGS__); errno = poc_saved_errno; } while (0)
+static inline const char *pocFormat(const char *value)
+{
+  if (!value) return "unknown";
+  if (!strcmp(value, "application/pdf")) return "pdf";
+  if (!strcmp(value, "image/urf")) return "urf";
+  if (!strcmp(value, "image/pwg-raster")) return "pwg-raster";
+  if (!strcmp(value, "image/jpeg")) return "jpeg";
+  if (!strcmp(value, "image/png")) return "png";
+  if (!strcmp(value, "application/postscript")) return "postscript";
+  if (!strcmp(value, "application/octet-stream")) return "octet-stream";
+  return "other";
+}
+static inline const char *pocCompression(const char *value)
+{
+  if (!value) return "unknown";
+  if (!strcmp(value, "none")) return "none";
+  if (!strcmp(value, "gzip")) return "gzip";
+  if (!strcmp(value, "deflate")) return "deflate";
+  if (!strcmp(value, "compress")) return "compress";
+  return "other";
+}
+static inline bool pocSubmission(ipp_op_t op)
+{
+  return op == IPP_OP_PRINT_JOB || op == IPP_OP_CREATE_JOB || op == IPP_OP_SEND_DOCUMENT;
+}
+static inline int pocId(int value) { return value > 0 ? value : 0; }
+static inline const char *pocOperation(ipp_op_t op)
+{
+  return op == IPP_OP_PRINT_JOB ? "print-job" : op == IPP_OP_CREATE_JOB ? "create-job" : "send-document";
+}
+static inline void pocRequest(pappl_client_t *client)
+{
+  ipp_op_t op = ippGetOperation(client->request);
+  ipp_attribute_t *last;
+  bool valid;
+  int saved = errno;
+  if (pocSubmission(op))
+  {
+    POC_INFO(papplLog, client->system, "lifecycle stage=ipp-submission begin request=%d operation=%s supplied=%s compression=%s",
+      pocId(ippGetRequestId(client->request)), pocOperation(op),
+      pocFormat(ippGetString(ippFindAttribute(client->request, "document-format", IPP_TAG_MIMETYPE), 0, NULL)),
+      pocCompression(ippGetString(ippFindAttribute(client->request, "compression", IPP_TAG_KEYWORD), 0, NULL)));
+    if (op == IPP_OP_SEND_DOCUMENT)
+    {
+      last = ippFindAttribute(client->request, "last-document", IPP_TAG_ZERO);
+      valid = last && ippGetGroupTag(last) == IPP_TAG_OPERATION && ippGetValueTag(last) == IPP_TAG_BOOLEAN && ippGetCount(last) == 1;
+      POC_INFO(papplLog, client->system, "lifecycle stage=ipp-last-document request=%d present=%d valid=%d value=%d",
+        pocId(ippGetRequestId(client->request)), last != NULL, valid, valid ? !!ippGetBoolean(last, 0) : 0);
+    }
+  }
+  errno = saved;
+}
+static inline void pocResponse(pappl_client_t *client)
+{
+  ipp_op_t op = ippGetOperation(client->request);
+  int saved = errno;
+  if (pocSubmission(op))
+    POC_INFO(papplLog, client->system, "lifecycle stage=ipp-submission returned request=%d operation=%s job=%d status=%s",
+      pocId(ippGetRequestId(client->request)), pocOperation(op),
+      pocId(ippGetInteger(ippFindAttribute(client->response, "job-id", IPP_TAG_INTEGER), 0)),
+      ippGetStatusCode(client->response) < 0x0100 ? "success" : ippGetStatusCode(client->response) < 0x0400 ? "other" : ippGetStatusCode(client->response) < 0x0500 ? "client-error" : "server-error");
+  errno = saved;
+}
+#endif
+"""
+
+def info(stage, args='', obj='job'):
+    logger = 'papplLogJob' if obj == 'job' else 'papplLog'
+    return '  POC_INFO(' + logger + ', ' + obj + ', "lifecycle stage=' + stage + '"' + args + ');\n'
+
+EXTRA = {name: [('#include "pappl-private.h"', '#include "pappl-private.h"\n#include "poc-boundaries.h"')]
+         for name in ('client-ipp.c', 'job-ipp.c', 'job-process.c')}
+def before(name, anchor, log):
+    EXTRA[name].append((anchor, log + anchor))
+def after(name, anchor, log):
+    EXTRA[name].append((anchor, anchor + '\n' + log.rstrip('\n')))
+
+after('client-ipp.c', '  op    = ippGetOperation(client->request);', '  pocRequest(client);\n')
+before('client-ipp.c', '  // Send the HTTP header and return...', '  pocResponse(client);\n')
+# Observe the existing presence probe exactly once, never add a peek/read.
+EXTRA['client-ipp.c'].append(('  char temp;\t\t\t\t// Data', '  char temp;\t\t\t\t// Data\n  bool poc_present;\n  int poc_errno;'))
+EXTRA['client-ipp.c'].append(('  else\n    return (httpPeek(client->http, &temp, 1) > 0);', """  else
+  {
+    if (pocSubmission(ippGetOperation(client->request)))
+      POC_INFO(papplLog, client->system, "lifecycle stage=ipp-data begin request=%d", pocId(ippGetRequestId(client->request)));
+    poc_present = httpPeek(client->http, &temp, 1) > 0;
+    poc_errno = errno;
+    if (pocSubmission(ippGetOperation(client->request)))
+      POC_INFO(papplLog, client->system, "lifecycle stage=ipp-data result request=%d present=%d", pocId(ippGetRequestId(client->request)), poc_present);
+    errno = poc_errno;
+    return (poc_present);
+  }"""))
+EXTRA['client-ipp.c'].append(('  if (httpGetState(client->http) != HTTP_STATE_POST_RECV)\n    return (false);', """  if (httpGetState(client->http) != HTTP_STATE_POST_RECV)
+  {
+    if (pocSubmission(ippGetOperation(client->request)))
+      POC_INFO(papplLog, client->system, "lifecycle stage=ipp-data result request=%d present=0", pocId(ippGetRequestId(client->request)));
+    return (false);
+  }"""))
+before('job-ipp.c', '  // If we have a PWG or Apple raster file, process it directly or return', info('document-effective request=%d operation=%s format=%s', ', pocId(ippGetRequestId(client->request)), pocOperation(ippGetOperation(client->request)), pocFormat(job->format)'))
+before('job-ipp.c', '  // Create a file for the request data...', info('document-branch mode=spooled-non-raster'))
+before('job-ipp.c', '    _papplJobProcessRaster(job, client);', info('document-branch mode=streaming-raster'))
+before('job-ipp.c', '  if (bytes < 0)', info('document-receive result=%s', ', bytes < 0 ? "error" : "eof"'))
+before('job-ipp.c', '  if (close(job->fd))', info('spool-close begin'))
+after('job-ipp.c', '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "Received %lu bytes of document data.", (unsigned long)total);', info('spool-close result=success'))
+before('job-ipp.c', '  _papplJobSubmitFile(job, filename);', info('spool-submit begin'))
+after('job-ipp.c', '  _papplJobSubmitFile(job, filename);', info('spool-submit returned'))
+before('job-ipp.c', '    papplClientRespondIPP(client, IPP_STATUS_ERROR_INTERNAL, "Unable to write print file: %s", strerror(error));\n\n    goto abort_job;\n  }\n\n  papplLogJob', info('spool-close result=error'))
+after('job-process.c', '  job->state              = IPP_JSTATE_PROCESSING;', info('processing-set'))
+before('job-process.c', '  // Open the output device...', info('device-availability begin in-use=%d', ', printer->device_in_use'))
+before('job-process.c', '  while (!printer->device && !printer->is_deleted && !job->is_canceled && papplSystemIsRunning(printer->system))', info('device-availability result=%s', ', printer->is_deleted ? "deleted" : job->is_canceled ? "canceled" : printer->device_in_use ? "unavailable" : "available"'))
+before('job-process.c', '  // Open the raster stream...', info('raster-open begin'))
+after('job-process.c', '  {\n    papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unable to open raster stream from client - %s", cupsLastErrorString());', info('raster-open result=error'))
+before('job-process.c', '  // Prepare options...', info('raster-open result=success') + info('raster-first-header begin'))
+after('job-process.c', '  {\n    papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unable to read raster stream from client - %s", cupsLastErrorString());', info('raster-first-header result=error'))
+before('job-process.c', '  if ((header_pages = header.cupsInteger[CUPS_RASTER_PWG_TotalPageCount]) > 0)', info('raster-first-header result=success'))
+anchor='\n  options = papplJobCreatePrintOptions(job, (unsigned)job->impressions, header.cupsBitsPerPixel > 8);'
+before('job-process.c', anchor, info('print-options begin mode=streaming'))
+after('job-process.c', anchor, info('print-options result=%d mode=streaming', ', options != NULL'))
+# Preserve callback conditions and calls verbatim; emit success/error inside original branches.
+for anchor, kind, failure, success in [
+ ('  if (!(printer->driver_data.rstartjob_cb)(job, options, job->printer->device))', 'rstartjob', '    job->state = IPP_JSTATE_ABORTED;\n    goto complete_job;', '  // Print pages...'),
+ ('      if (!(filter->cb)(job, job->printer->device, filter->cbdata))', 'filter', '\tjob->state = IPP_JSTATE_ABORTED;', None),
+ ('  if (!(job->printer->driver_data.printfile_cb)(job, options, device))', 'printfile', '    papplJobDeletePrintOptions(options);\n    return (false);', '  papplJobDeletePrintOptions(options);\n  papplJobSetImpressionsCompleted(job, 1);')]:
+    before('job-process.c', anchor, info('print-dispatch begin callback='+kind))
+    if kind == 'filter':
+        EXTRA['job-process.c'].append((anchor+'\n'+failure, anchor+'\n      {\n'+info('print-dispatch returned callback=filter result=0')+failure+'\n      }\n      else\n      {\n'+info('print-dispatch returned callback=filter result=1')+'      }'))
+    else:
+        after('job-process.c', anchor+'\n  {', info('print-dispatch returned callback='+kind+' result=0'))
+        before('job-process.c', success, info('print-dispatch returned callback='+kind+' result=1'))
+anchor='  options = papplJobCreatePrintOptions(job, 0, job->printer->driver_data.ppm_color > 0);'
+before('job-process.c', anchor, info('print-options begin mode=raw'))
+after('job-process.c', anchor, info('print-options result=%d mode=raw', ', options != NULL'))
+for name, rules in EXTRA.items():
+    RULES.setdefault(name, []).extend(rules)
+
 def patch(root):
-    pending = {}
+    header = Path(root) / 'pappl/poc-boundaries.h'
+    if header.exists():
+        raise ValueError('PAPPL diagnostics header already exists')
+    pending = {header: HEADER}
     for name, rules in RULES.items():
         path = Path(root) / 'pappl' / name
         source = path.read_text()

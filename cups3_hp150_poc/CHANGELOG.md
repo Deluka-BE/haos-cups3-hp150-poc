@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.20
+
+- Diagnostics-only: bracket IPP acceptance/data presence, effective format, streaming/spooled selection, processing/device availability, raster open/first header, options and callback dispatch, spool close/submit.
+- Fixed allowlisted INFO metadata, numeric request/job correlation, Send-Document last-document booleans; no raw document/device/user strings. Exact-source anchors fail closed; new logs preserve errno.
+- Preserve 0.1.19 behavior, print chain and source pins. No extra reads, read wrapper, retries, deadlines, queue/job creation or automatic printing. Root cause remains unproven.
+- Add regression checks for anchors, redaction, operation/format/compression labels, partial metadata, status/error paths and unchanged original calls; document one-print manual HAOS validation.
+
 ## 0.1.19
 
 - Persist PAPPL app/queue and retrofit installable-option state in `/data/state`; retain generated HP PPD/runtime assets and ephemeral spool/capture paths under `/work`.

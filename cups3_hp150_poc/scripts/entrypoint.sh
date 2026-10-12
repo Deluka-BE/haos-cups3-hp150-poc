@@ -31,7 +31,7 @@ case "${1:-server}" in
         python3 /opt/poc/scripts/usb-settle.py
         set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
         -o server-options=no-tls -o listen-hostname=0.0.0.0 -o log-file=- -o log-level=debug
-        echo "INFO: lifecycle stage=startup version=0.1.19 diagnostics=enabled"
+        echo "INFO: lifecycle stage=startup version=0.1.20 diagnostics=enabled"
         echo "PAPPL transport: policy=ipp-only uri-security-supported=none tls=disabled port=8631 credentials=not-configured"
         # Log only the validated numeric port and these fixed, non-secret arguments.
         printf 'PAPPL launch: POC_PORT=<%s> (effective)\n' "${POC_PORT:-8631}"
