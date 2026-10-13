@@ -1,3 +1,73 @@
+# Release 0.1.23: localize the stall after spooled retrofit entry
+
+The 0.1.22 iPhone trace reaches successful Send-Document completion and
+`retrofit-entry mode=spooled`, then continues polling without downstream
+markers. Inspection of the pinned `_prFilter` shows `papplJobCreatePrintOptions`
+is the first operation after entry. `_prCreateJobData` follows, before the old
+binding/accepted markers. In its automatic content optimization branch,
+`_prGetFileContentType` already launches `pdfinfo`/`exiftool` with `popen`, scans
+with `fgets`, and waits with `pclose`. This is an early subprocess, distinct
+from the conversion filter chain, and a plausible blocking location.
+
+All added messages have exactly `lifecycle stage=retrofit-<fixed-name>
+phase=begin|end`, at INFO, with no runtime value interpolation. Every added
+logger call saves/restores errno. The spooled callback boundaries are:
+
+| Fixed stage suffix | Original operation enclosed |
+| --- | --- |
+| print-options | `papplJobCreatePrintOptions` (PAPPL1 option/raster setup) |
+| job-data | `_prCreateJobData` (PPD and option mapping/filter data) |
+| filter-data | `cfFilterDataGetExt` and PPD pointer acquisition |
+| input-filename | `papplJobGetDocumentFilename` |
+| input-open | Existing `open` condition and failure branch |
+| format | Existing binding/allowlisted accepted log and document format getter |
+| conversion | Conversion iteration / `_prPPDFindCUPSFilter`, existing rejection branch |
+| ppd-load | `ppdFilterLoadPPD` |
+| backend-connect | Existing conditional `papplDeviceGetData` and filter-data assignment |
+| pdf-scan | Existing PDF-only `fdopen` / `getline` / `rewind` / line cleanup |
+| chain-setup | Array creation, allocation and original chain assembly |
+| status | First `_prUpdateStatus` before launching filters |
+| impressions | `papplJobSetImpressions` |
+| output-open | Existing `/dev/null` open |
+
+Nested boundaries in the shared job-data/content helper are `content-detect`
+(`_prGetFileContentType`), `metadata-launch` (`popen`), `metadata-scan` (the
+existing conditional `fgets` scan and parsing), and `metadata-wait` (`pclose`).
+Their original conditions remain intact; shared helper markers can also appear
+for existing non-spooled callers. No reads, subprocesses, getters, stream
+wrappers, temporary streams, command changes or runtime control logic were
+added. This source has no additional temp/output stream setup in `_prFilter`.
+The existing INFO `filter-chain started` immediately precedes `pocChain`, and
+the older per-filter markers remain the downstream launch diagnostics.
+
+The last begin without an end identifies the operation or bounded setup block
+that has not returned. Input-open/conversion ends describe successful progress;
+original early error returns bypass those ends. Conditional metadata/PDF markers
+are absent when their original branches are skipped. Missing ends can also mean
+process failure or logging failure, so they are evidence of location, not proof
+of deadlock. Job-data outside content detection and PAPPL option creation remain
+coarse library boundaries: one trace cannot identify their internal lock or
+individual getter. Metadata-scan cannot distinguish waiting for child output
+from parsing that output; metadata-wait isolates the child wait. No content,
+paths, names, addresses, raw IPP values, environment, argv or errno text is added
+to logs. Existing upstream messages and older diagnostics are untouched.
+
+Maintenance record (2026-10-13, 0.1.23): expanded reviewed pinned source excerpts
+cover the complete spooled callback and metadata scan. Four new regressions
+check PDF-path marker order, identity of all original code after removing the
+new markers (including conditions, read/launch counts and arguments), compiled
+errno preservation with a logger that overwrites errno, and fail-closed anchor
+drift without source writes. Full isolated Debian suite: 94 tests, all passed.
+Repository validation, Python compilation, all five shell syntax checks,
+`git diff --check`, configured PAPPL1 compile/link gate and compilation/linking
+of the patched pinned retrofit library/application passed against PAPPL 1.3.1.
+Dependency pins and all print, threading, retry, timing, spooling, USB, mDNS,
+IPP and privilege behavior are preserved. Earlier 0.1.20/0.1.21/0.1.22 diagnostics
+remain. No stable CUPS2.4 access, HAOS install, physical print or queue creation
+was performed. The central runtime maintenance log is outside repository scope
+and was not touched. A new manually initiated iPhone trace is still needed;
+no live acceptance is claimed.
+
 # Release 0.1.22: acquire logging options before privilege drop
 
 The 0.1.21 startup order caused the reported failure: Docker starts the USB

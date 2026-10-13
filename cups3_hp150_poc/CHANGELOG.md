@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.23
+
+- Diagnostics only: bracket spooled retrofit options, job data, input, format, conversion, PPD, PDF scan, chain, status and output setup with fixed INFO markers preserving errno.
+- Expose the existing automatic PDF metadata launch/read/wait before filter launch; preserve all conditions, reads, commands, source pins, privileges and earlier diagnostics.
+- Add ordering, code identity, errno and anchor-drift regressions; no automatic jobs or live printer operations.
+
 ## 0.1.22
 
 - Fix startup with Supervisor-owned options: validate server `log_level` in the privileged USB bootstrap and carry only the allowlisted `POC_LOG_LEVEL` across the existing permanent privilege drop; the shell never reads options.

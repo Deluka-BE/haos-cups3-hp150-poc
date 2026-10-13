@@ -1,5 +1,9 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.23** adds fixed INFO begin/end markers after the spooled
+retrofit callback entry, including automatic PDF metadata subprocess launch,
+scan and wait. Printing behavior is unchanged. See [release diagnostics](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.22** reads and validates `log_level` before the permanent privilege
 drop, fixing startup when Supervisor options are inaccessible to UID 10001.
 Only the validated value reaches the application; config permissions are unchanged.

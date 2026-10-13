@@ -10,6 +10,62 @@ def replace(source, old, new):
     return source.replace(old, new)
 
 
+def diagnostic_marker(stage, phase):
+    # Call sites supply literals only; save errno even for pre-call markers.
+    return ('  { int poc_saved_errno = errno;\n'
+            '    papplLogJob(job, PAPPL_LOGLEVEL_INFO, '
+            '"lifecycle stage=retrofit-' + stage + ' phase=' + phase + '");\n'
+            '    errno = poc_saved_errno; }\n')
+
+
+def instrument_retrofit(source):
+    # Limit callback instrumentation to the spooled callback, not similar
+    # streaming/raw operations. All anchors are pinned and fail closed.
+    start = source.index('bool\n_prFilter(')
+    end = source.index("// '_prFreeJobData()'", start + 20)
+    callback = source[start:end]
+    spans = [
+        ('print-options', '  job_options = papplJobCreatePrintOptions(job, 1, INT_MAX, 1);'),
+        ('job-data', '  job_data = _prCreateJobData(job, job_options);'),
+        ('filter-data', '  filter_data_ext =', '  ppd = filter_data_ext->ppd;'),
+        ('input-filename', '  filename = papplJobGetDocumentFilename(job, 1);'),
+        ('input-open', '  if ((fd = open(filename, O_RDONLY)) < 0)', '  // Get input file format'),
+        ('format', '  pocLogBinding(job)', '  informat = papplJobGetDocumentFormat(job, 1);'),
+        ('conversion', '  for (conversion =', '  // Set input and output formats for the filter chain'),
+        ('ppd-load', '  ppdFilterLoadPPD(job_data->filter_data);'),
+        ('backend-connect', '  if (strncmp(job_data->device_uri, "cups:", 5) == 0)', '  // Check whether the PDF input is a banner or test page'),
+        ('pdf-scan', '    fp = fdopen(fd, "r");', '    free(line);'),
+        ('chain-setup', '  job_data->chain = cupsArrayNew(NULL, NULL, NULL, 0, NULL, NULL);', '  cupsArrayAdd(job_data->chain, job_data->print);'),
+        ('status', '  _prUpdateStatus(papplJobGetPrinter(job), device);'),
+        ('impressions', '  papplJobSetImpressions(job, 1);'),
+        ('output-open', '  nullfd = open("/dev/null", O_RDWR);'),
+    ]
+    for span in spans:
+        stage, first, *last = span
+        expected = 2 if stage in ('status', 'backend-connect') else 1
+        if callback.count(first) != expected or (last and callback.count(last[0]) != 1):
+            raise ValueError('Pinned retrofit boundary anchor mismatch')
+        a = callback.index(first)
+        b = callback.index(last[0], a) + len(last[0]) if last else a + len(first)
+        if stage in ('input-open', 'conversion', 'backend-connect'):
+            # End before the following comment, after original error branches.
+            b = callback.rfind('  //', a, b)
+        callback = callback[:a] + diagnostic_marker(stage, 'begin') + callback[a:b] + '\n' + diagnostic_marker(stage, 'end') + callback[b:]
+    source = source[:start] + callback + source[end:]
+    # Content auto-detection launches a metadata subprocess before filter start.
+    for stage, anchor in [
+        ('content-detect', '    job_options->print_content_optimize = _prGetFileContentType(job);'),
+        ('metadata-launch', '    FILE *pd = popen(command, "r");'),
+        ('metadata-wait', '      pclose(pd);'),
+    ]:
+        source = replace(source, anchor, diagnostic_marker(stage, 'begin') + anchor + '\n' + diagnostic_marker(stage, 'end'))
+    source = replace(source, '      while (fgets(line, sizeof(line), pd))',
+                     diagnostic_marker('metadata-scan', 'begin') + '      while (fgets(line, sizeof(line), pd))')
+    source = replace(source, diagnostic_marker('metadata-wait', 'begin'),
+                     diagnostic_marker('metadata-scan', 'end') + diagnostic_marker('metadata-wait', 'begin'))
+    return source
+
+
 def patch(root):
     path = Path(root) / 'pappl-retrofit/print-job.c'
     s = path.read_text()
@@ -137,6 +193,7 @@ static int pocChain(int in, int out, int seekable, cf_filter_data_t *data, void 
                 '  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=streaming");\n  papplLogJob(job, PAPPL_LOGLEVEL_DEBUG,\n\t      "Printing job in streaming mode");')
     s = replace(s, '  if (!job || !device)\n    return (false);',
                 '  if (!job || !device)\n    return (false);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=raw");')
+    s = instrument_retrofit(s)
     path.write_text(s)
     path = Path(root) / 'pappl-retrofit/cups-backends.c'
     s = path.read_text()
