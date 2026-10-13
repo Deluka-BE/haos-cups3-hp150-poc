@@ -1,3 +1,77 @@
+# Release 0.1.24: bound automatic PDF metadata detection
+
+Root cause: the pinned upstream `_prGetFileContentType()` composes
+`pdfinfo <filename> 2>/dev/null || exiftool <filename> 2>/dev/null`,
+launches it with `popen(command, "r")`, consumes stdout through blocking
+`fgets`, then calls `pclose`, with no deadline. The fresh 0.1.23 iPhone
+trace reaches `metadata-launch phase=end` and `metadata-scan phase=begin`
+but never scan end, metadata wait or filter-chain launch. This localizes the
+observed stall to unbounded metadata stdout consumption/parsing, before the
+conversion chain. The helper's internal reason for stalling is not established.
+
+The narrow patch executes fixed `/usr/bin/pdfinfo` then optional
+`/usr/bin/exiftool` with argv containing exactly the utility and the actual
+absolute spool filename. There is no shell or filename interpolation. A
+nonabsolute filename fails open rather than being interpreted as an option.
+The parent retains the child PID, uses nonblocking read/poll and a monotonic
+**2,500 ms deadline per helper**, including stdout consumption and waiting for
+exit. At most 16 KiB is captured into a fixed stack buffer; NUL output or reaching
+the cap rejects detection. Lines over 255 bytes are ignored without parsing
+fragments. Stdin/stderr use /dev/null. No output is logged.
+
+Timeout/read/overflow failure closes the pipe, sends SIGTERM, allows **100 ms**
+for exit, escalates to SIGKILL if necessary and always calls waitpid to reap the
+child. Polling continues to honor the deadline when stdout closes before the
+child exits. Both helpers therefore have a nominal maximum combined budget of
+**5.2 seconds**, plus OS scheduling and final SIGKILL/reap overhead; as with any
+POSIX process, an uninterruptible kernel task can delay final reaping.
+
+Only a successful helper exit with recognized Producer/Creator/Creator Tool
+metadata chooses a content optimization. pdfinfo has first preference;
+failure, missing utility or no recognized creator tries exiftool once.
+Both failures, timeout, malformed/empty output or no recognized creator return
+`PAPPL_CONTENT_AUTO`; metadata detection cannot reject the print job.
+The upstream creator arrays and content mappings are retained. Word-boundary
+matching safely handles a name at the start of a value and always advances
+after a nonmatching embedded substring, avoiding the upstream parser's
+before-string read and nonadvancing search. JPEG/PNG behavior is unchanged.
+
+The entire upstream metadata function is checked against a pinned reference
+before replacement; drift fails the build before source writes. The reference
+`scripts/pdf-metadata-upstream.c` is review input, never compiled. Docker stages
+it and `scripts/pdf-metadata.h` alongside the patcher. Existing content-detect
+and spooled callback/filter/backend diagnostics remain. Metadata launch/scan/wait
+begin/end markers retain their order per helper, now enclosing fork,
+nonblocking capture and reap. Added INFO labels are fixed/allowlisted:
+`metadata helper=pdfinfo|exiftool`,
+`metadata outcome=complete|helper-failure|bounded-failure`,
+`metadata detection=recognized|auto`. All new logging preserves errno;
+no filename, argv, environment, metadata or client value reaches it.
+The obsolete raw metadata/filename DEBUG/WARN messages in this replaced
+function are removed.
+
+Maintenance record (2026-10-13, 0.1.24): approved metadata-only fix and version
+bump. Deterministic compiled C fixtures verify exact argv with spaces and shell
+metacharacters, pdfinfo success/preference, fallback, both missing/failing,
+content mappings, unknown/empty/malformed/NUL output, large/no-newline output,
+SIGTERM-resistant hangs, stdout-close-then-hang, deadline bounds, repeated
+successful execution, no unreaped children, redaction, errno preservation and
+marker order. Regression coverage verifies the entire spooled callback is
+identical before/after metadata replacement. Full host and isolated Debian
+suites each passed all 105 tests. Repository validator, Python compilation,
+all five shell syntax checks, diff whitespace, configured PAPPL1 compile/link
+and patched pinned retrofit library/application build passed against PAPPL 1.3.1.
+The isolated validator used a pure-Python PyYAML check fixture under ignored
+run-data; no application dependency or host package was changed.
+
+All architecture, dependency pins, PAPPL1 compatibility, permanent privilege
+drop, token scrubbing, persistent state, mDNS, USB, HP ULD, filters and backends
+are preserved. No stable CUPS2.4 changes, HAOS installation, queue creation or
+physical printing are part of this work. The central maintenance log is outside
+repo scope and was not modified. The build gate is local x86_64/PAPPL1; a new
+ARM64 image build and manually initiated iPhone trace remain runtime acceptance,
+not claimed by these fixture/build checks.
+
 # Release 0.1.23: localize the stall after spooled retrofit entry
 
 The 0.1.22 iPhone trace reaches successful Send-Document completion and

@@ -1,6 +1,7 @@
 #!/usr/bin/python3
-"""Fail closed against pinned retrofit source; fixed-label job path diagnostics."""
+"""Pinned retrofit diagnostics and bounded, fail-open PDF metadata detection."""
 from pathlib import Path
+import re
 import sys
 
 
@@ -64,6 +65,76 @@ def instrument_retrofit(source):
     source = replace(source, diagnostic_marker('metadata-wait', 'begin'),
                      diagnostic_marker('metadata-scan', 'end') + diagnostic_marker('metadata-wait', 'begin'))
     return source
+
+
+def bound_metadata(source):
+    start = source.index('_prGetFileContentType(pappl_job_t *job)')
+    end = source.index('\n}', start) + 2
+    old = source[start:end]
+    # Pin the whole upstream implementation, apart from our literal markers.
+    plain = re.sub(r'  \{ int poc_saved_errno = errno;\n    papplLogJob\(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-[a-z-]+ phase=(?:begin|end)"\);\n    errno = poc_saved_errno; \}\n', '', old)
+    expected = (Path(__file__).parent / 'pdf-metadata-upstream.c').read_text()
+    def canonical(text):
+        return '\n'.join(line.rstrip() for line in text.splitlines() if line.strip())
+    if canonical(plain) != canonical(expected):
+        raise ValueError('Pinned metadata function mismatch')
+    arrays = old[old.index('  const char *automatic[]'):old.index('  found = NULL;')]
+    new = """_prGetFileContentType(pappl_job_t *job)
+{
+  const char *informat = papplJobGetDocumentFormat(job, 1);
+  pappl_content_t content_type = PAPPL_CONTENT_AUTO;
+""" + arrays + r"""
+  if (!strcmp(informat, "image/jpeg")) return PAPPL_CONTENT_PHOTO;
+  if (!strcmp(informat, "image/png")) return PAPPL_CONTENT_GRAPHIC;
+  if (strcmp(informat, "application/pdf")) return content_type;
+  const char *filename = papplJobGetDocumentFilename(job, 1);
+  const char *tools[] = {"/usr/bin/pdfinfo", "/usr/bin/exiftool"};
+  char output[POC_METADATA_CAP + 1];
+  for (int tool = 0; tool < 2; tool++) {
+    pocMetadataMarker(job, tool == 0 ? "metadata helper=pdfinfo" : "metadata helper=exiftool");
+    if (!pocMetadataRun(job, tools[tool], filename, output)) continue;
+    char *line = output;
+    while (*line) {
+      char *next = strchr(line, '\n');
+      if (next) *next++ = 0;
+      else next = line + strlen(line);
+      // Reject oversized lines rather than parsing truncated fragments.
+      if (strlen(line) <= 255) {
+        char *p = line;
+        while (isspace((unsigned char)*p)) p++;
+        for (int i = 0; fields[i]; i++) {
+          size_t n = strlen(fields[i]);
+          if (strncasecmp(p, fields[i], n)) continue;
+          char *value = p + n;
+          while (isspace((unsigned char)*value)) value++;
+          if (*value != ':') continue;
+          value++;
+          while (isspace((unsigned char)*value)) value++;
+          for (int j = 0; j < 5; j++)
+            for (int k = 0; creating_apps[j][k]; k++) {
+              const char *app = creating_apps[j][k];
+              char *q = value;
+              while ((q = strcasestr(q, app))) {
+                if ((q == value || !isalnum((unsigned char)q[-1])) &&
+                    !isalnum((unsigned char)q[strlen(app)])) {
+                  pocMetadataMarker(job, "metadata detection=recognized");
+                  return (pappl_content_t)(1 << j);
+                }
+                q++; // Always advance after an embedded, non-word match.
+              }
+            }
+        }
+      }
+      line = next;
+    }
+  }
+  pocMetadataMarker(job, "metadata detection=auto");
+  return PAPPL_CONTENT_AUTO;
+}
+"""
+    helper = (Path(__file__).parent / 'pdf-metadata.h').read_text()
+    result = source[:start] + new.rstrip() + source[end:]
+    return replace(result, "//\n// '_prASCII85()'", helper + "//\n// '_prASCII85()'")
 
 
 def patch(root):
@@ -194,6 +265,7 @@ static int pocChain(int in, int out, int seekable, cf_filter_data_t *data, void 
     s = replace(s, '  if (!job || !device)\n    return (false);',
                 '  if (!job || !device)\n    return (false);\n  papplLogJob(job, PAPPL_LOGLEVEL_INFO, "lifecycle stage=retrofit-entry mode=raw");')
     s = instrument_retrofit(s)
+    s = bound_metadata(s)
     path.write_text(s)
     path = Path(root) / 'pappl-retrofit/cups-backends.c'
     s = path.read_text()

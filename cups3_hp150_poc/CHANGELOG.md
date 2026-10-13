@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.24
+
+- Replace only unbounded PDF metadata shell/popen execution with direct pdfinfo then optional exiftool, nonblocking bounded stdout, a 2.5-second deadline per helper, TERM/KILL cleanup and child reaping.
+- Preserve creator/content mappings and all existing lifecycle diagnostics; failures return AUTO and continue printing. Remove raw metadata/filename diagnostics from this path.
+- Add compiled deterministic helper regressions for safe argv, fallback, malformed/large output, hangs, reaping, redaction and marker order; preserve the entire spooled callback.
+
 ## 0.1.23
 
 - Diagnostics only: bracket spooled retrofit options, job data, input, format, conversion, PPD, PDF scan, chain, status and output setup with fixed INFO markers preserving errno.

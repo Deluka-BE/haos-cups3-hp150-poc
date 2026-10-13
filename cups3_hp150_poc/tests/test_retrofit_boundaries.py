@@ -21,11 +21,14 @@ class RetrofitBoundaryTests(unittest.TestCase):
             shutil.copytree(ROOT / 'tests/fixtures/lifecycle', root, dirs_exist_ok=True)
             # Baseline is the exact pre-0.1.23 patch, including all older diagnostics.
             instrument = patcher.instrument_retrofit
+            bounded = patcher.bound_metadata
             try:
                 patcher.instrument_retrofit = lambda source: source
+                patcher.bound_metadata = lambda source: source
                 patcher.patch(root)
             finally:
                 patcher.instrument_retrofit = instrument
+                patcher.bound_metadata = bounded
             baseline = (root / 'pappl-retrofit/print-job.c').read_text()
             return baseline, instrument(baseline)
 
@@ -63,6 +66,17 @@ class RetrofitBoundaryTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertLess(callback.index('strcmp(informat, "application/pdf")'), callback.index('retrofit-pdf-scan phase=begin'))
         self.assertLess(callback.index('rewind(fp)'), callback.index('retrofit-pdf-scan phase=end'))
+
+    def test_bounded_metadata_preserves_entire_spooled_callback(self):
+        _, source = self.sources()
+        actual = patcher.bound_metadata(source)
+        start = source.index('bool\n_prFilter(')
+        end = source.index("// '_prFreeJobData()'", start)
+        a = actual.index('bool\n_prFilter(')
+        b = actual.index("// '_prFreeJobData()'", a)
+        self.assertEqual(source[start:end], actual[a:b])
+        self.assertIn('retrofit-content-detect phase=begin', actual)
+        self.assertIn('retrofit-content-detect phase=end', actual)
 
     def test_logging_preserves_errno_even_when_logger_changes_it(self):
         compiler = shutil.which('cc')

@@ -1,5 +1,10 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.24** bounds automatic PDF metadata detection with direct argv execution,
+2.5 seconds per helper, bounded stdout and fail-open AUTO. Existing lifecycle
+diagnostics and the successful Windows/CUPS USB/filter path are preserved.
+See [implementation and maintenance](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.23** adds fixed INFO begin/end markers after the spooled
 retrofit callback entry, including automatic PDF metadata subprocess launch,
 scan and wait. Printing behavior is unchanged. See [release diagnostics](cups3_hp150_poc/DOCS.md).

@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.23
+ARG BUILD_VERSION=0.1.24
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -47,7 +47,7 @@ WORKDIR /tmp/retrofit
 RUN git init && git remote add origin https://github.com/OpenPrinting/pappl-retrofit.git \
     && git fetch --depth 1 origin "$RETROFIT_COMMIT" && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "$RETROFIT_COMMIT"
-COPY scripts/patch-job-path.py /tmp/patch-job-path.py
+COPY scripts/patch-job-path.py scripts/pdf-metadata.h scripts/pdf-metadata-upstream.c /tmp/
 RUN python3 /tmp/patch-job-path.py /tmp/retrofit
 # Restrict the application itself, in addition to using a separate backend directory.
 RUN python3 - <<'PY'
