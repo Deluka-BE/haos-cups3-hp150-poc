@@ -95,6 +95,43 @@ class USBRuntimeTests(unittest.TestCase):
         drop.assert_called_once_with([7])
         execute.assert_called_once_with('/opt/poc/scripts/entrypoint.sh', ['entrypoint.sh', 'drivers'])
 
+    def test_options_validated_before_drop_and_never_read_at_uid10001(self):
+        for level in ('fatal', 'error', 'warn', 'info', 'debug'):
+            identity = [0]
+            def read():
+                self.assertEqual(identity[0], 0)
+                return level
+            def drop(groups):
+                identity[0] = 10001
+            def execute(*args):
+                self.assertEqual(identity[0], 10001)
+                self.assertEqual(os.environ['POC_LOG_LEVEL'], level)
+            with self.subTest(level=level), patch.dict(os.environ, {'POC_LOG_LEVEL': 'SECRET'}), \
+                 patch.object(runtime.runpy, 'run_path', return_value={'read_level': Mock(side_effect=read)}) as loader, \
+                 patch.object(runtime, 'prepare_state_runtime'), \
+                 patch.object(runtime, 'prepare_mdns_runtime'), \
+                 patch.object(runtime, 'hp_groups', return_value=[42]), \
+                 patch.object(runtime, 'drop_privileges', side_effect=drop), \
+                 patch.object(runtime.os, 'execv', side_effect=execute), \
+                 patch.object(runtime.sys, 'argv', ['usb-runtime.py']), patch('builtins.print'):
+                runtime.main()
+                loader.return_value['read_level'].assert_called_once_with()
+
+    def test_options_failure_precedes_setup_drop_and_launch(self):
+        for error in (ValueError('SECRET'), PermissionError('SECRET'), UnicodeError('SECRET')):
+            with self.subTest(error=type(error)), patch.dict(os.environ, {'POC_LOG_LEVEL': 'SECRET'}), \
+                 patch.object(runtime.runpy, 'run_path', return_value={'read_level': Mock(side_effect=error)}), \
+                 patch.object(runtime, 'prepare_state_runtime') as setup, \
+                 patch.object(runtime, 'drop_privileges') as drop, \
+                 patch.object(runtime.os, 'execv') as execute, \
+                 patch.object(runtime.sys, 'argv', ['usb-runtime.py', 'server']), patch('builtins.print') as log:
+                self.assertEqual(runtime.main(), 1)
+                self.assertNotIn('POC_LOG_LEVEL', os.environ)
+                setup.assert_not_called()
+                drop.assert_not_called()
+                execute.assert_not_called()
+                self.assertNotIn('SECRET', str(log.call_args_list))
+
     def test_fresh_runtime_dir_has_only_scoped_ownership(self):
         with patch.object(runtime, 'Path') as paths, patch.object(runtime.os, 'chown') as chown:
             paths.return_value.is_symlink.return_value = False

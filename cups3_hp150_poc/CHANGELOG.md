@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.22
+
+- Fix startup with Supervisor-owned options: validate server `log_level` in the privileged USB bootstrap and carry only the allowlisted `POC_LOG_LEVEL` across the existing permanent privilege drop; the shell never reads options.
+- Keep the exact PAPPL 1.3.1 allowlist, standalone info default and fail-closed error handling, without changing Supervisor config permissions, add-on schema or print behavior.
+- Add privilege-transition, inaccessible-after-drop, redaction/default regressions; record maintenance and validation in DOCS.md.
+
 ## 0.1.21
 
 - Add validated `log_level` add-on option with PAPPL 1.3.1 supported values fatal/error/warn/info/debug; default info retains lifecycle markers and suppresses DEBUG polling.

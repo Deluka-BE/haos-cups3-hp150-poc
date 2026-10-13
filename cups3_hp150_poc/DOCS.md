@@ -1,3 +1,38 @@
+# Release 0.1.22: acquire logging options before privilege drop
+
+The 0.1.21 startup order caused the reported failure: Docker starts the USB
+bootstrap as root, which permanently drops to UID/GID 10001 before the shell
+reads Supervisor-managed `/data/options.json`. Only `/data/state` is prepared
+for the app identity. An unreadable options file therefore produced the fixed
+invalid-options error immediately after the USB identity marker, even with
+`log_level: info`. No live HAOS filesystem was inspected for this investigation.
+
+The bootstrap now reads and validates server logging options before identity
+setup/drop, reusing the exact PAPPL 1.3.1 allowlist (`fatal`, `error`, `warn`,
+`info`, `debug`). It clears any inherited `POC_LOG_LEVEL` and exports only the
+validated value. Missing standalone options/file or key still defaults to `info`;
+malformed, invalid or unreadable options fail before setup/drop/app launch with
+no input or exception disclosure. The shell accepts only that allowlisted env
+value and never reads options. Drivers/validate modes retain their existing
+behavior. Supervisor-managed `/data` and options ownership/mode are untouched.
+
+The 0.1.21 schema/default, token scrubbing, USB groups, permanent identity drop,
+`no_new_privs`, persistence, mDNS/AirPrint, filters/backends, INFO lifecycle
+markers and `log-file=-` are preserved. No CUPS 2.4 service access/modification,
+HAOS install, physical print or queue creation was performed.
+
+Maintenance record (2026-10-13, 0.1.22): regression coverage exercises all five
+levels across the bootstrap transition and real shell, deletes the options file
+at the transition, checks simulated UID 10001 acquisition ordering, fail-closed
+errors before setup/drop/exec, standalone defaults and unchanged INFO markers.
+Host suite: 90 tests, 88 passed and two compiler-environment skips. Isolated
+Debian suite: all 90 passed. Repository validation, Python compilation, all five
+shell syntax checks, the explicit configured PAPPL1 compile/link gate and
+`git diff --check` passed. Installed PAPPL is 1.3.1 and the retrofit checkout
+matches the unchanged pin. Identity transitions in the regressions are mocked;
+no live HAOS startup is claimed. The central runtime maintenance log is outside
+the authorized repository scope and was not touched.
+
 # Release 0.1.21: configurable PAPPL server logging
 
 Set the add-on option `log_level` to `fatal`, `error`, `warn`, `info` or
@@ -10,7 +45,7 @@ Verified against installed PAPPL 1.3.1 and its `pappl/mainloop-subcommands.c`
 `log-level` parser: these five lowercase spellings are the supported values.
 Pinned retrofit `49ad525a3715a57aae24c715ef0767b55ffb1991` delegates to
 `papplMainloop` and uses that parser. No `warning`, `trace` or `none` alias is
-exposed. `/data/options.json` is read after privilege drop; a missing file/key
+exposed. In 0.1.21, `/data/options.json` was read after privilege drop; a missing file/key
 uses `info` for standalone containers and upgrades. Invalid values, malformed
 JSON, non-object options and unreadable files stop server startup with a fixed
 error before driver staging or server launch. Input contents are never logged.

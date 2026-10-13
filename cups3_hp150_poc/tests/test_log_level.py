@@ -31,12 +31,11 @@ class LogLevelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
             stage = Path(tmp)
             options = stage / 'options.json'
-            options.write_text(raw)
+            options.write_text(raw if raw is not None else '{}')
             helper = stage / 'log-level.py'
             helper.write_text((ROOT / 'scripts/log-level.py').read_text().replace("Path('/data/options.json')", repr(str(options))))
             source = (ROOT / 'scripts/entrypoint.sh').read_text()
             source = source[:source.index('python3 /opt/poc/scripts/validate-driver.py')] + source[source.index('export LD_LIBRARY_PATH='):]
-            source = source.replace('/opt/poc/scripts/log-level.py', str(helper))
             source = source.replace('cd /work/filter', ':')
             for name in ('state-runtime', 'runtime-check', 'usb-diagnostics', 'usb-settle'):
                 source = source.replace('python3 /opt/poc/scripts/' + name + '.py', ':')
@@ -46,8 +45,33 @@ class LogLevelTests(unittest.TestCase):
             app = stage / 'legacy-printer-app'
             app.write_text('#!' + sys.executable + '\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n')
             app.chmod(0o755)
-            return subprocess.run(['sh', str(entry)], capture_output=True, text=True,
-                                  env={**os.environ, 'PATH': tmp + os.pathsep + str(Path(sys.executable).parent) + os.pathsep + os.defpath, 'POC_PORT': '8631'})
+            # Exercise the actual privileged bootstrap and real shell, with only
+            # identity/setup syscalls stubbed. Delete options at the transition:
+            # the app path must work without any options file access afterward.
+            bootstrap = stage / 'usb-runtime.py'
+            bootstrap.write_text((ROOT / 'scripts/usb-runtime.py').read_text())
+            wrapper = stage / 'launch.py'
+            wrapper.write_text("import os, runpy, sys\n"
+                "r = runpy.run_path(sys.argv[1])\n"
+                "g = r['main'].__globals__\n"
+                "g['prepare_state_runtime'] = lambda: None\n"
+                "g['prepare_mdns_runtime'] = lambda: None\n"
+                "g['hp_groups'] = lambda: [42]\n"
+                "options_path = sys.argv[3]\n"
+                "def drop(groups):\n"
+                "    assert groups == [42]\n"
+                "    assert os.environ['POC_LOG_LEVEL'] in ('fatal', 'error', 'warn', 'info', 'debug')\n"
+                "    assert 'SUPERVISOR_TOKEN' not in os.environ and 'HASSIO_TOKEN' not in os.environ\n"
+                "    if os.path.exists(options_path): os.unlink(options_path)\n"
+                "g['drop_privileges'] = drop\n"
+                "entry = sys.argv[2]\n"
+                "g['os'].execv = lambda path, args: os.execve('/bin/sh', ['sh', entry], os.environ)\n"
+                "sys.argv = [sys.argv[0], 'server', sys.argv[3]]\n"
+                "sys.exit(r['main']())\n")
+            if raw is None:
+                options.unlink()
+            return subprocess.run([sys.executable, str(wrapper), str(bootstrap), str(entry), str(options)], capture_output=True, text=True,
+                                  env={**os.environ, 'PATH': tmp + os.pathsep + str(Path(sys.executable).parent) + os.pathsep + os.defpath, 'POC_PORT': '8631', 'POC_LOG_LEVEL': 'SECRET', 'SUPERVISOR_TOKEN': 'SECRET', 'HASSIO_TOKEN': 'SECRET'})
 
     def test_each_level_exact_argv(self):
         for level in LOG.LEVELS:
@@ -57,7 +81,7 @@ class LogLevelTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout.splitlines()[-1]),
                                  ['server', '-o', 'server-port=8631', '-o', 'server-options=no-tls',
                                   '-o', 'listen-hostname=0.0.0.0', '-o', 'log-file=-', '-o', 'log-level=' + level])
-                self.assertIn('INFO: lifecycle stage=startup version=0.1.21 diagnostics=enabled', result.stdout)
+                self.assertIn('INFO: lifecycle stage=startup version=0.1.22 diagnostics=enabled', result.stdout)
         result = self.launch('{}')
         self.assertEqual(json.loads(result.stdout.splitlines()[-1])[-1], 'log-level=info')
 
@@ -73,6 +97,17 @@ class LogLevelTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, '')
                 self.assertEqual(result.stderr, 'ERROR: invalid add-on log_level options; refusing server startup\n')
+
+    def test_missing_standalone_options_defaults_before_transition(self):
+        result = self.launch(None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout.splitlines()[-1])[-1], 'log-level=info')
+
+    def test_entrypoint_never_reads_options(self):
+        source = (ROOT / 'scripts/entrypoint.sh').read_text()
+        self.assertNotIn('/data/options.json', source)
+        self.assertNotIn('log-level.py', source)
+        self.assertIn('fatal|error|warn|info|debug)', source)
 
     def test_read_error_fails_safely(self):
         with patch.object(LOG, 'read_level', side_effect=PermissionError('SECRET')):

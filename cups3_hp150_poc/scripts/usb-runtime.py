@@ -5,6 +5,7 @@ import os
 from itertools import islice
 from pathlib import Path
 import re
+import runpy
 import stat
 import sys
 
@@ -83,6 +84,15 @@ def prepare_state_runtime():
 def main():
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
         os.environ.pop(key, None)
+    os.environ.pop('POC_LOG_LEVEL', None)
+    if len(sys.argv) == 1 or sys.argv[1] in ('', 'server'):
+        try:
+            # Read Supervisor-owned options while privileged; carry only the allowlist.
+            read_level = runpy.run_path(str(Path(__file__).with_name('log-level.py')))['read_level']
+            os.environ['POC_LOG_LEVEL'] = read_level()
+        except (OSError, ValueError, UnicodeError):
+            print('ERROR: invalid add-on log_level options; refusing server startup', file=sys.stderr)
+            return 1
     try:
         prepare_state_runtime()
         groups = hp_groups()

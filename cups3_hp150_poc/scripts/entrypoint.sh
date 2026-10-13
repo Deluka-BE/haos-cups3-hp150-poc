@@ -1,7 +1,11 @@
 #!/bin/sh
 set -eu
 if [ "${1:-server}" = server ]; then
-    log_level=$(python3 /opt/poc/scripts/log-level.py)
+    # Bootstrap supplies only a validated value; never reopen Supervisor options.
+    case "${POC_LOG_LEVEL:-}" in
+        fatal|error|warn|info|debug) log_level=$POC_LOG_LEVEL ;;
+        *) echo 'ERROR: invalid add-on log_level options; refusing server startup' >&2; exit 1 ;;
+    esac
 fi
 case "${POC_PORT:-8631}" in *[!0-9]*|'') echo 'Invalid POC_PORT' >&2; exit 1;; esac
 [ "${POC_PORT:-8631}" -ge 1024 ] && [ "${POC_PORT:-8631}" -le 65535 ]
@@ -34,7 +38,7 @@ case "${1:-server}" in
         python3 /opt/poc/scripts/usb-settle.py
         set -- legacy-printer-app server -o "server-port=${POC_PORT:-8631}" \
         -o server-options=no-tls -o listen-hostname=0.0.0.0 -o log-file=- -o "log-level=$log_level"
-        echo "INFO: lifecycle stage=startup version=0.1.21 diagnostics=enabled"
+        echo "INFO: lifecycle stage=startup version=0.1.22 diagnostics=enabled"
         echo "PAPPL transport: policy=ipp-only uri-security-supported=none tls=disabled port=8631 credentials=not-configured"
         # Log only the validated numeric port and these allowlisted, non-secret arguments.
         printf 'PAPPL launch: POC_PORT=<%s> (effective)\n' "${POC_PORT:-8631}"

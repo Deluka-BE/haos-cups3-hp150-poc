@@ -1,5 +1,9 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.22** reads and validates `log_level` before the permanent privilege
+drop, fixing startup when Supervisor options are inaccessible to UID 10001.
+Only the validated value reaches the application; config permissions are unchanged.
+
 Version **0.1.21** exposes the PAPPL server `log_level` add-on option, defaulting
 to `info` to retain lifecycle diagnostics and suppress DEBUG polling. Supported
 values: `fatal`, `error`, `warn`, `info`, `debug`. See [logging configuration](cups3_hp150_poc/DOCS.md).
