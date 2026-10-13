@@ -1,5 +1,10 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.25** adds one sanitized first-page raster-header diagnostic at the
+HP rastertospl boundary. The existing decoder runs once; no raster pixels are
+read by diagnostics and print behavior/settings remain unchanged. See
+[implementation, log format and maintenance](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.24** bounds automatic PDF metadata detection with direct argv execution,
 2.5 seconds per helper, bounded stdout and fail-open AUTO. Existing lifecycle
 diagnostics and the successful Windows/CUPS USB/filter path are preserved.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.25
+
+- Diagnostics only: scope a compiled legacy-header shim to rastertospl, using the existing CUPS decoder once and returning the unchanged legacy prefix/status/errno to HP.
+- Log the first decoded raster header's fixed numeric fields, including cupsNumColors, packed expected bytes per line and a conservative relation; no pixel reads, stream proxy, capture or settings changes.
+- Add real CUPS differential and supervisor fixtures for stream/header identity, bounds, redaction and malformed input; retain all 0.1.24 behavior and protections.
+
 ## 0.1.24
 
 - Replace only unbounded PDF metadata shell/popen execution with direct pdfinfo then optional exiftool, nonblocking bounded stdout, a 2.5-second deadline per helper, TERM/KILL cleanup and child reaping.

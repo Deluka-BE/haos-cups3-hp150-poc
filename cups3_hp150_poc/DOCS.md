@@ -1,3 +1,93 @@
+# Release 0.1.25: first raster header at the HP boundary
+
+Diagnostics only. The 0.1.24 AirPrint PDF path now completes through pdftopdf,
+Ghostscript, rastertospl and the backend, but physical color output has a regular
+line/raster artifact even with neutral HP vendor settings. This release collects
+the missing header evidence; it does not identify or correct that artifact.
+
+The SHA256-pinned ARM64 HP ULD ELF imports the legacy `cupsRasterReadHeader`
+symbol from the dynamic CUPS libraries. The new build-time compiled
+`scripts/raster-header-diagnostics.c` shared library is preloaded **only into
+the supervised rastertospl child**, via `scripts/job-stage.py`. Python, USB,
+Ghostscript, pdftopdf and PAPPL do not receive this preload.
+
+The legacy CUPS header omits cupsNumColors. The shim calls the public extended
+`cupsRasterReadHeader2` once on the existing stream, then copies the exact
+legacy prefix into HP's caller-provided header. Both installed Debian CUPS APIs
+call the same internal decoder exactly once, then copy their respective header
+or zero it on failure; disassembly was checked during implementation. Compile
+assertions guard the unsigned width and prefix ABI. This retains the existing
+decoder, raster handle, stdin/file descriptor, header contents, return status
+and errno, including failure/EOF zeroing. It does not open another raster reader,
+read pixels, consume a second header, proxy stdin, replay bytes or create files.
+No proprietary binary, library, CMS or PPD is patched.
+
+After the first successful header only, the shim attempts one fixed numeric
+record write to the existing supervised stderr. The record fits a 256-byte
+stack buffer even with every field at UINT32_MAX; it is never retried. The
+supervisor accepts only the exact versioned record with 14 unsigned 32-bit
+decimal fields, using its existing 256-byte line bound. It reconstructs one
+INFO message per invocation and discards all other vendor text as before.
+A malformed/overlong record, missing header or unsuccessful diagnostic write
+produces no header line and does not reject or retry printing. Header strings,
+page-size names, filenames, options, environment, credentials and image data
+are never logged. Vendor stderr cannot inject arbitrary text through this path.
+
+Fields are width, height, xdpi, ydpi, cupsBitsPerColor, cupsBitsPerPixel,
+cupsNumColors, cupsBytesPerLine, cupsColorSpace, cupsColorOrder and
+cupsCompression. cupsRowCount, cupsRowFeed and cupsRowStep are also reported as
+numeric context. Values are **decoded by CUPS**, including its legacy-format
+defaults, rather than a raw wire-header dump. Numeric color-space/order enums
+are retained without guessing a textual interpretation.
+
+`expected_bytes_per_line = (width * cupsBitsPerPixel + 7) // 8` uses
+overflow-safe Python integer arithmetic. `packed_relation=equal|above|below`
+compares the actual count with this packed reference. This is not a validation
+error: padding and banded/planar color layouts can change the interpretation
+of a line, and row/band controls or physical page dimensions must not be
+confused with raster pixel width. No assertion, setting change or job failure
+depends on this calculation.
+
+Illustrative sanitized line (fixture values, not a physical print observation):
+
+```text
+INFO: path job=7 stage=rastertospl raster-header page=first width=13 height=3 xdpi=600 ydpi=600 cupsBitsPerColor=8 cupsBitsPerPixel=24 cupsNumColors=3 cupsBytesPerLine=39 cupsColorSpace=1 cupsColorOrder=0 cupsCompression=0 cupsRowCount=0 cupsRowFeed=0 cupsRowStep=0 expected_bytes_per_line=39 packed_relation=equal comparison_scope=packed-reference
+```
+
+Maintenance record (2026-10-13, 0.1.25): authorized diagnostics-only release,
+with version metadata and changelog updated. Deterministic fixtures compare
+instrumented versus baseline CUPS legacy headers byte-for-byte, pixel output,
+return values and errno for two-page uncompressed v1, compressed v2, PWG,
+RGB chunked/banded/planar and packed 1-bit inputs. Empty/corrupt/truncated input,
+named-file input, suppressed stderr, single decoder invocation, prefix ABI,
+failure zeroing, one-time logging, UINT32_MAX arithmetic, fragmented/malformed/
+overlong records, redaction, token scrubbing and stage scoping are covered.
+An end-to-end fixture runs the actual shim through the supervisor, preserving
+binary stdout and emitting only the reconstructed sanitized header line.
+
+Verification: the full isolated Debian suite passed **116/116 tests**, including
+all compiled real-CUPS fixtures. The host suite passed 111 tests with 5 CUPS-
+dependent tests skipped because host development headers are absent; all five
+ran successfully in Debian. Repository validator, Python compilation, all shell
+syntax checks and git diff --check passed. The configured PAPPL1 compile/link
+gate passed without executing its probe; the unchanged patched retrofit build
+also passed. The shim compiled with -Wall -Wextra -Werror.
+
+All 0.1.24 protections, PDF helper bounds, source pins, filter/backend chain,
+HP assets, UID/GID/no_new_privs, persistence, mDNS, USB discovery/settling,
+PAPPL1 gate, port 8631 and info default remain. No queue creation, print action,
+settings change, HAOS deployment or CUPS2.4 repository access is performed.
+The central maintenance log at /home/philip/lex-v2/runtime/maintenance.log
+records this release separately.
+
+Caveats: local compile/link and fixtures use x86_64 Debian/PAPPL1. The ARM64
+vendor import was verified statically without execution; native ARM64/HAOS
+loading and a manually initiated real-job trace remain runtime acceptance.
+Only the first successful page per rastertospl process is logged. A future
+vendor changing header API or a CUPS ABI change requires review of this shim.
+The instrumentation preserves decoder semantics verified for the current
+Debian libraries; no physical artifact diagnosis is claimed by fixture tests.
+
 # Release 0.1.24: bound automatic PDF metadata detection
 
 Root cause: the pinned upstream `_prGetFileContentType()` composes

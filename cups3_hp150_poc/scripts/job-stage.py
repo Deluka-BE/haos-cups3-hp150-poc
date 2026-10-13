@@ -9,10 +9,38 @@ import sys
 import time
 
 
+RASTER_SHIM = '/opt/poc/lib/raster-header-diagnostics.so'
+RASTER_FIELDS = ('width', 'height', 'xdpi', 'ydpi', 'cupsBitsPerColor',
+                 'cupsBitsPerPixel', 'cupsNumColors', 'cupsBytesPerLine',
+                 'cupsColorSpace', 'cupsColorOrder', 'cupsCompression',
+                 'cupsRowCount', 'cupsRowFeed', 'cupsRowStep')
+RASTER_RECORD = re.compile(rb'HP150_RASTER_HEADER 1' + rb' ([0-9]{1,10})' * 14)
+
+
+def raster_header_message(line):
+    """Accept only a fixed numeric record; no vendor text is ever forwarded."""
+    match = RASTER_RECORD.fullmatch(line)
+    if not match:
+        return None
+    values = tuple(int(value) for value in match.groups())
+    if any(value > 0xffffffff for value in values):
+        return None
+    width, bits, actual = values[0], values[5], values[7]
+    expected = (width * bits + 7) // 8
+    relation = 'equal' if actual == expected else 'above' if actual > expected else 'below'
+    return ('raster-header page=first ' +
+            ' '.join(f'{key}={value}' for key, value in zip(RASTER_FIELDS, values)) +
+            f' expected_bytes_per_line={expected} packed_relation={relation}'
+            ' comparison_scope=packed-reference')
+
+
 def supervise(stage, command, job, timeout=180):
     env = dict(os.environ)
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
         env.pop(key, None)
+    # Scope the shim to the proprietary raster child, never Python/USB.
+    if stage == 'rastertospl':
+        env['LD_PRELOAD'] = RASTER_SHIM + (' ' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
     def report(message):
         print(f'INFO: path job={job} stage={stage} {message}', file=sys.stderr, flush=True)
     report('started deadline-seconds=' + str(timeout))
@@ -28,6 +56,7 @@ def supervise(stage, command, job, timeout=180):
     line = b''
     dropping = False
     control_count = 0
+    raster_reported = False
     selector = selectors.DefaultSelector()
     selector.register(child.stderr, selectors.EVENT_READ)
     deadline = time.monotonic() + timeout
@@ -63,6 +92,11 @@ def supervise(stage, command, job, timeout=180):
                     if not dropping and match and control_count < 64:
                         print(line.decode('ascii'), file=sys.stderr, flush=True)
                         control_count += 1
+                    if stage == 'rastertospl' and not dropping and not raster_reported:
+                        message = raster_header_message(line)
+                        if message is not None:
+                            report(message)
+                            raster_reported = True
                     line = b''
                     dropping = False
                 elif len(line) < 256 and not dropping:
