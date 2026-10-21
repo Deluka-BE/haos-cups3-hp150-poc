@@ -143,6 +143,8 @@ class USBRuntimeTests(unittest.TestCase):
 
     def test_runtime_setup_failure_preserves_usb_launch(self):
         with patch.object(runtime, 'Path') as paths, patch.object(runtime, 'prepare_state_runtime'), \
+             patch.object(runtime.sys, 'argv', ['usb-runtime.py', 'drivers']), \
+             patch.dict(os.environ, {'POC_CAPTURE_RASTER_ONCE': '0'}), \
              patch.object(runtime, 'hp_groups', return_value=[7]), \
              patch.object(runtime, 'drop_privileges') as drop, patch.object(runtime.os, 'execv') as execute, \
              patch('builtins.print') as log:

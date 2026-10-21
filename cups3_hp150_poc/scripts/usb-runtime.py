@@ -65,6 +65,40 @@ def prepare_mdns_runtime():
         print('mDNS: runtime=failed reason=directory-setup-failed', flush=True)
 
 
+def prepare_capture_runtime(enabled):
+    if not enabled:
+        return
+    state = Path('/run/hp150-raster-capture')
+    try:
+        state.mkdir(mode=0o700, exist_ok=True)
+        if state.is_symlink() or not state.is_dir():
+            raise RuntimeError('invalid capture state directory')
+        os.chown(state, UID, GID)
+        os.chmod(state, 0o700)
+        for name in ('armed', 'claimed'):
+            try:
+                (state / name).unlink()
+            except FileNotFoundError:
+                pass
+        capture = Path('/share/cups3-capture')
+        capture.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if capture.is_symlink() or not capture.is_dir():
+            raise RuntimeError('invalid capture directory')
+        os.chown(capture, UID, GID)
+        os.chmod(capture, 0o700)
+        armed = state / 'armed'
+        armed.write_text('1\n', encoding='ascii')
+        os.chown(armed, UID, GID)
+        os.chmod(armed, 0o600)
+    except (OSError, RuntimeError):
+        # Capture is diagnostic only: disable it rather than block printing.
+        try:
+            (state / 'armed').unlink()
+        except OSError:
+            pass
+        print('Raster capture: armed=false reason=setup-failed', flush=True)
+
+
 def prepare_state_runtime():
     # HAOS mounts /data freshly; own only our directory, never the mount or contents.
     data = Path('/data')
@@ -88,13 +122,18 @@ def main():
     if len(sys.argv) == 1 or sys.argv[1] in ('', 'server'):
         try:
             # Read Supervisor-owned options while privileged; carry only the allowlist.
-            read_level = runpy.run_path(str(Path(__file__).with_name('log-level.py')))['read_level']
+            option_reader = runpy.run_path(str(Path(__file__).with_name('log-level.py')))
+            read_level = option_reader['read_level']
+            read_capture_once = option_reader.get('read_capture_once', lambda: False)
             os.environ['POC_LOG_LEVEL'] = read_level()
+            capture_once = read_capture_once()
+            os.environ['POC_CAPTURE_RASTER_ONCE'] = '1' if capture_once else '0'
         except (OSError, ValueError, UnicodeError):
             print('ERROR: invalid add-on log_level options; refusing server startup', file=sys.stderr)
             return 1
     try:
         prepare_state_runtime()
+        prepare_capture_runtime(os.environ.get('POC_CAPTURE_RASTER_ONCE') == '1')
         groups = hp_groups()
         prepare_mdns_runtime()
         drop_privileges(groups)

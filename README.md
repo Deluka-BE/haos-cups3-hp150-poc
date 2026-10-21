@@ -1,5 +1,7 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
+Version **0.1.26** adds a temporary, disabled-by-default one-shot capture around the existing HP `rastertospl` boundary. When armed, the first filter invocation tees the exact CUPS raster input and SPL/QPDL output to `/share/cups3-capture/` while preserving the live stream, 0.1.25 header diagnostics, vendor exit status and existing deadline/cancellation behavior. Capture is bounded to 512 MiB per direction, requires 1152 MiB free space before arming, and fails open to printing if storage diagnostics cannot be retained. See [capture procedure and safeguards](cups3_hp150_poc/DOCS.md).
+
 Version **0.1.25** adds one sanitized first-page raster-header diagnostic at the
 HP rastertospl boundary. The existing decoder runs once; no raster pixels are
 read by diagnostics and print behavior/settings remain unchanged. See
@@ -374,6 +376,22 @@ No automatic print jobs were run.
 
 ## Install on Home Assistant OS (2026.10)
 
+The current source version is **0.1.26**. `repository.yaml` and the add-on's
+`config.yaml`/Dockerfile already form a source-build repository: no image registry,
+`build.yaml`, icon or logo is required for installation. Supervisor supplies
+`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.26` and
+`aarch64` for standalone builds. This installability review does not require
+another version bump or any change to the separate CUPS 2.4 add-on.
+
+The complete working tree (including the one-shot capture script and tests) must
+first be committed and pushed through the normal host workflow before the GitHub
+URL can offer these changes. Reloading Home Assistant cannot see unpublished
+worker files. No push or release is performed from this worker. To test unpublished
+sources instead, copy `cups3_hp150_poc/` in full to `/addons/cups3_hp150_poc/`
+on the HAOS system, reload the store and install it from **Local add-ons**.
+That local copy has a different repository identity; it does not update an
+already installed GitHub-repository instance or share its persistent `/data`.
+
 1. On an **aarch64/ARM64** HAOS system, open **Settings → Apps → App store**
    (called **Add-ons → Add-on store** in older interfaces).
 2. Open the top-right **⋮ → Repositories**, enter
@@ -391,11 +409,11 @@ No automatic print jobs were run.
    pass during the build and again at startup. The EULA is available in the
    image at `/usr/share/doc/hp150-uld/eula.txt`; review HP's license before use
    or redistribution. Proprietary files are never committed to Git.
-5. Keep **Protection mode** enabled. Version 0.1.14 uses host networking;
+5. Keep **Protection mode** enabled. This add-on uses host networking;
    TCP 8631 must be free and cannot be translated using a port mapping.
 6. Click **Start**, then inspect **Logs** for driver validation and service startup.
-   Click **Open Web UI**, or visit `http://<HAOS-IP>:8631/` using the configured
-   host port. This is PAPPL's direct HTTP interface, without ingress or TLS.
+   Click **Open Web UI**, or visit `http://<HAOS-IP>:8631/`.
+   This is PAPPL's direct HTTP interface, without ingress or TLS.
    Unlike the loopback-only development command below, HAOS publishes this port
    to the host network interfaces; use it on a trusted local network.
 7. Follow the 0.1.14 regression and iPhone test steps above. This is not
@@ -406,6 +424,8 @@ No automatic print jobs were run.
 From 0.1.19, saved queue/app configuration uses persistent `/data/state`.
 Generated runtime assets, captures and spool remain container-local under `/work`;
 export capture evidence separately before updates, rebuilds or uninstalling.
+The optional `capture_raster_once` diagnostic instead writes its one-shot files
+to `/share/cups3-capture/`; it remains disabled by default.
 The driver files are baked into `/hp-driver`. Version 0.1.12 requests raw USB
 mapping for discovery and manual test printing; no driver-directory mount or user option is needed.
 

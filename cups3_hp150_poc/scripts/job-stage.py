@@ -7,6 +7,10 @@ import signal
 import subprocess
 import sys
 import time
+import hashlib
+import pathlib
+import shutil
+import threading
 
 
 RASTER_SHIM = '/opt/poc/lib/raster-header-diagnostics.so'
@@ -15,6 +19,11 @@ RASTER_FIELDS = ('width', 'height', 'xdpi', 'ydpi', 'cupsBitsPerColor',
                  'cupsColorSpace', 'cupsColorOrder', 'cupsCompression',
                  'cupsRowCount', 'cupsRowFeed', 'cupsRowStep')
 RASTER_RECORD = re.compile(rb'HP150_RASTER_HEADER 1' + rb' ([0-9]{1,10})' * 14)
+CAPTURE_STATE = pathlib.Path('/run/hp150-raster-capture')
+CAPTURE_DIR = pathlib.Path('/share/cups3-capture')
+CAPTURE_MAX_STREAM = 512 * 1024 * 1024
+CAPTURE_MIN_FREE = 1152 * 1024 * 1024
+CAPTURE_CHUNK = 1024 * 1024
 
 
 def raster_header_message(line):
@@ -34,6 +43,214 @@ def raster_header_message(line):
             ' comparison_scope=packed-reference')
 
 
+def _safe_unlink(path):
+    try:
+        pathlib.Path(path).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+def _claim_capture(stage, job):
+    """Atomically claim the one-shot. Any setup failure disables capture, never printing."""
+    if stage != 'rastertospl' or os.environ.get('POC_CAPTURE_RASTER_ONCE') != '1':
+        return None
+    try:
+        os.replace(CAPTURE_STATE / 'armed', CAPTURE_STATE / 'claimed')
+    except OSError:
+        return None
+    try:
+        if CAPTURE_DIR.is_symlink() or not CAPTURE_DIR.is_dir():
+            raise OSError('capture directory unavailable')
+        if shutil.disk_usage(CAPTURE_DIR).free < CAPTURE_MIN_FREE:
+            raise OSError('insufficient capture storage')
+        parts = {
+            'in': CAPTURE_DIR / 'cups3-reference.in.raster.part',
+            'out': CAPTURE_DIR / 'cups3-reference.out.spl.part',
+        }
+        for path in parts.values():
+            _safe_unlink(path)
+        inf = parts['in'].open('xb', buffering=0)
+        outf = parts['out'].open('xb', buffering=0)
+        for path in parts.values():
+            os.chmod(path, 0o600)
+        return {
+            'job': job, 'parts': parts, 'in_file': inf, 'out_file': outf,
+            'in_hash': hashlib.sha256(), 'out_hash': hashlib.sha256(),
+            'in_bytes': 0, 'out_bytes': 0, 'bad': threading.Event(),
+            'lock': threading.Lock(), 'reason': None, 'raster_header': None,
+        }
+    except OSError:
+        try:
+            inf.close()
+        except (NameError, OSError):
+            pass
+        try:
+            outf.close()
+        except (NameError, OSError):
+            pass
+        for suffix in ('cups3-reference.in.raster.part', 'cups3-reference.out.spl.part'):
+            _safe_unlink(CAPTURE_DIR / suffix)
+        print(f'INFO: path job={job} stage=rastertospl capture status=skipped reason=storage',
+              file=sys.stderr, flush=True)
+        return None
+
+
+def _capture_bad(session, reason):
+    with session['lock']:
+        if session['reason'] is None:
+            session['reason'] = reason
+            session['bad'].set()
+
+
+def _write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        try:
+            count = os.write(fd, view)
+        except InterruptedError:
+            continue
+        if count <= 0:
+            raise BrokenPipeError('short write')
+        view = view[count:]
+
+
+def _tee_input(child, session):
+    try:
+        while True:
+            chunk = os.read(0, CAPTURE_CHUNK)
+            if not chunk:
+                break
+            view = memoryview(chunk)
+            while view:
+                try:
+                    count = os.write(child.stdin.fileno(), view)
+                except InterruptedError:
+                    continue
+                if count <= 0:
+                    raise BrokenPipeError('short write')
+                forwarded = bytes(view[:count])
+                session['in_bytes'] += count
+                session['in_hash'].update(forwarded)
+                if not session['bad'].is_set():
+                    if session['in_bytes'] > CAPTURE_MAX_STREAM:
+                        _capture_bad(session, 'limit')
+                    else:
+                        try:
+                            _write_all(session['in_file'].fileno(), forwarded)
+                        except OSError:
+                            _capture_bad(session, 'write')
+                view = view[count:]
+    except OSError:
+        # The capture now contains only bytes successfully presented to the child.
+        pass
+    finally:
+        try:
+            child.stdin.close()
+        except OSError:
+            pass
+        try:
+            if not session['bad'].is_set():
+                os.fsync(session['in_file'].fileno())
+            session['in_file'].close()
+        except OSError:
+            _capture_bad(session, 'write')
+
+
+def _tee_output(child, session):
+    try:
+        while True:
+            chunk = os.read(child.stdout.fileno(), CAPTURE_CHUNK)
+            if not chunk:
+                break
+            session['out_bytes'] += len(chunk)
+            session['out_hash'].update(chunk)
+            if not session['bad'].is_set():
+                if session['out_bytes'] > CAPTURE_MAX_STREAM:
+                    _capture_bad(session, 'limit')
+                else:
+                    try:
+                        _write_all(session['out_file'].fileno(), chunk)
+                    except OSError:
+                        _capture_bad(session, 'write')
+            _write_all(1, chunk)
+    except OSError:
+        try:
+            child.stdout.close()
+        except OSError:
+            pass
+    finally:
+        try:
+            if not session['bad'].is_set():
+                os.fsync(session['out_file'].fileno())
+            session['out_file'].close()
+        except OSError:
+            _capture_bad(session, 'write')
+
+
+def _capture_formats(input_path, output_path):
+    """Bounded signature inspection; never emit arbitrary document bytes."""
+    with input_path.open('rb') as stream:
+        magic = stream.read(4)
+    raster = magic in (b'RaSt', b'tSaR', b'RaS2', b'2SaR', b'RaS3', b'3SaR')
+    with output_path.open('rb') as stream:
+        header = stream.read(65536)
+    pjl = re.match(rb'\x1b%-12345X((?:@PJL[^\r\n]*\r?\n)+)', header)
+    qpdl = bool(pjl and re.search(
+        rb'(?:^|\n)@PJL ENTER LANGUAGE[ \t]*=[ \t]*QPDL[ \t]*\r?\n', pjl[1]))
+    return (f'in_format={"CUPS-raster" if raster else "unknown"}\n'
+            f'in_magic_hex={magic.hex()}\n'
+            f'out_format={"QPDL-declared" if qpdl else "unknown"}\n'
+            f'out_signature={"PJL-QPDL" if qpdl else "none"}\n')
+
+
+def _finish_capture(session):
+    parts = session['parts']
+    if session['bad'].is_set():
+        for path in parts.values():
+            _safe_unlink(path)
+        reason = session['reason'] if session['reason'] in ('limit', 'write') else 'capture'
+        print(f'INFO: path job={session["job"]} stage=rastertospl capture status=failed reason={reason}',
+              file=sys.stderr, flush=True)
+        return
+    final_in = CAPTURE_DIR / 'cups3-reference.in.raster'
+    final_out = CAPTURE_DIR / 'cups3-reference.out.spl'
+    meta_part = CAPTURE_DIR / 'cups3-reference.meta.txt.part'
+    meta = CAPTURE_DIR / 'cups3-reference.meta.txt'
+    try:
+        os.replace(parts['in'], final_in)
+        os.replace(parts['out'], final_out)
+        os.chmod(final_in, 0o600)
+        os.chmod(final_out, 0o600)
+        text = (f'job={session["job"]}\n'
+                f'filter_exit={session.get("filter_exit", "unknown")}\n'
+                + _capture_formats(final_in, final_out)
+                + f'raster_header={session["raster_header"] or "unavailable"}\n'
+                + 'in_file=cups3-reference.in.raster\n'
+                f'in_bytes={session["in_bytes"]}\n'
+                f'in_sha256={session["in_hash"].hexdigest()}\n'
+                'out_file=cups3-reference.out.spl\n'
+                f'out_bytes={session["out_bytes"]}\n'
+                f'out_sha256={session["out_hash"].hexdigest()}\n')
+        _safe_unlink(meta_part)
+        with meta_part.open('x', encoding='ascii') as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(meta_part, 0o600)
+        os.replace(meta_part, meta)
+        print(f'INFO: path job={session["job"]} stage=rastertospl capture status=complete '
+              f'in_bytes={session["in_bytes"]} in_sha256={session["in_hash"].hexdigest()} '
+              f'out_bytes={session["out_bytes"]} out_sha256={session["out_hash"].hexdigest()} '
+              'path=/share/cups3-capture', file=sys.stderr, flush=True)
+    except OSError:
+        for path in (parts['in'], parts['out'], final_in, final_out, meta_part, meta):
+            _safe_unlink(path)
+        print(f'INFO: path job={session["job"]} stage=rastertospl capture status=failed reason=publish',
+              file=sys.stderr, flush=True)
+
+
 def supervise(stage, command, job, timeout=180):
     env = dict(os.environ)
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
@@ -44,12 +261,27 @@ def supervise(stage, command, job, timeout=180):
     def report(message):
         print(f'INFO: path job={job} stage={stage} {message}', file=sys.stderr, flush=True)
     report('started deadline-seconds=' + str(timeout))
+    capture = _claim_capture(stage, job)
+    popen_kwargs = dict(env=env, close_fds=False, stderr=subprocess.PIPE, start_new_session=True)
+    if capture is not None:
+        popen_kwargs.update(stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        child = subprocess.Popen(command, env=env, close_fds=False,
-                                 stderr=subprocess.PIPE, start_new_session=True)
+        child = subprocess.Popen(command, **popen_kwargs)
     except OSError as error:
+        if capture is not None:
+            _capture_bad(capture, 'capture')
+            try:
+                capture['in_file'].close(); capture['out_file'].close()
+            except OSError:
+                pass
+            _finish_capture(capture)
         report(f'failed errno={error.errno}')
         return 1
+    in_thread = out_thread = None
+    if capture is not None:
+        in_thread = threading.Thread(target=_tee_input, args=(child, capture), daemon=True)
+        out_thread = threading.Thread(target=_tee_output, args=(child, capture), daemon=True)
+        in_thread.start(); out_thread.start()
     # Drain continuously with bounded storage; report only fixed failure categories.
     categories = set()
     tail = b''
@@ -84,8 +316,6 @@ def supervise(stage, command, job, timeout=180):
             if not chunk:
                 selector.unregister(key.fileobj)
                 continue
-            # Preserve CUPS transport state protocol, only known fixed keywords.
-            # Overlong or unknown lines are discarded, never echoed.
             for byte in chunk:
                 if byte == 10:
                     match = re.fullmatch(rb'STATE: ([+-]?)(connecting-to-device|connected-to-device|offline-report|media-empty-warning|media-needed|marker-supply-low-warning|marker-supply-empty-warning|door-open-report)', line)
@@ -96,6 +326,8 @@ def supervise(stage, command, job, timeout=180):
                         message = raster_header_message(line)
                         if message is not None:
                             report(message)
+                            if capture is not None:
+                                capture['raster_header'] = message
                             raster_reported = True
                     line = b''
                     dropping = False
@@ -118,13 +350,19 @@ def supervise(stage, command, job, timeout=180):
                     report('libusb-code=' + match.group(1).decode('ascii'))
             tail = tail[-256:]
     result = child.wait()
+    if capture is not None:
+        capture['filter_exit'] = result
+        in_thread.join(timeout=5)
+        out_thread.join(timeout=5)
+        if in_thread.is_alive() or out_thread.is_alive():
+            _capture_bad(capture, 'capture')
+        _finish_capture(capture)
     for sig, handler in old_handlers.items():
         signal.signal(sig, handler)
     selector.close()
     child.stderr.close()
     report(f'finished exit={result} timeout={str(timed_out).lower()} cancelled={str(cancelled).lower()} retry=none')
     return 1 if timed_out or result < 0 else result
-
 
 def valid_usb_uri(uri):
     # Classification only: no parsing result or input is ever printed.

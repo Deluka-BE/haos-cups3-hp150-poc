@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.26
+
+- Add disabled-by-default `capture_raster_once` diagnostics around the existing supervised HP rastertospl stage; one atomic claim stores fixed-name IN CUPS raster, OUT SPL/QPDL and metadata under `/share/cups3-capture/`.
+- Preserve the live binary stream, inherited CUPS channels, 0.1.25 raster-header shim, vendor exit status and 180-second supervision. Armed capture tees stdin/stdout concurrently to avoid pipe deadlocks; normal disabled jobs keep the 0.1.25 direct inherited stdin/stdout path.
+- Bound each captured direction to 512 MiB and require 1152 MiB free before capture; storage/limit/publish failure is diagnostic-only and does not intentionally fail printing. Files are not world-writable and logs contain only safe job id, sizes, hashes and fixed path/status labels.
+- Add exact input/output/forwarding identity, one-shot, nonzero exit, fail-open storage/limit and 12 MiB bidirectional deadlock regressions; retain all prior security and lifecycle tests.
+
 ## 0.1.25
 
 - Diagnostics only: scope a compiled legacy-header shim to rastertospl, using the existing CUPS decoder once and returning the unchanged legacy prefix/status/errno to HP.

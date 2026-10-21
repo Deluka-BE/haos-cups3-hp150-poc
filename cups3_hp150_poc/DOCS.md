@@ -1,3 +1,35 @@
+# Release 0.1.26: one-shot rastertospl IN/OUT capture
+
+This is a temporary diagnostics-only release for direct comparison with the known-good CUPS 2.4 reference. The add-on option `capture_raster_once` defaults to `false`. With it disabled, `job-stage.py` retains the 0.1.25 inherited stdin/stdout execution path: no capture pipe, file, buffering or storage check is introduced.
+
+When `capture_raster_once: true`, the privileged bootstrap validates the option before the permanent UID/GID 10001 drop, prepares only `/run/hp150-raster-capture` and `/share/cups3-capture`, then creates a one-shot `armed` marker. The first rastertospl invocation atomically renames `armed` to `claimed`; later jobs cannot capture again until a restart with the option still enabled. Fixed output names are:
+
+- `cups3-reference.in.raster` — bytes successfully presented to the HP rastertospl child;
+- `cups3-reference.out.spl` — bytes emitted by the HP child before backend handoff;
+- `cups3-reference.meta.txt` — numeric job id, filter exit status, byte counts, SHA-256 values, CUPS raster magic, output signature/declared format, and the first decoded raster header (width, height, DPI, bit depth, color space/order and row layout). Missing header evidence is explicitly `unavailable`; QPDL detection is declaration evidence, not page validation.
+
+The armed path gives the HP child stdin/stdout pipes and uses two concurrent tee threads while the existing supervisor continues draining sanitized stderr. This avoids the classic stdin/stdout pipe deadlock and leaves fd 3/4 and other inherited CUPS descriptors available because `close_fds=False` remains unchanged. The 0.1.25 `LD_PRELOAD` header shim is still scoped only to rastertospl. Vendor stderr filtering, process-group cancellation, the 180-second deadline and exit-status handling are unchanged. The live OUT stream is forwarded to the backend while it is captured; capture data is never interpreted as image content by the diagnostic code.
+
+Safety bounds are 512 MiB maximum per captured direction. Before starting an armed capture the filesystem must report at least 1152 MiB free, leaving 128 MiB beyond the 1 GiB combined file caps. If preflight fails, printing proceeds without capture. If a capture write or size bound fails mid-job, teeing to the live print path continues and temporary capture files are discarded. Publish errors are reported with a fixed reason. No document bytes, title, username, filename, options, environment, UUID, URI or credentials are logged. Capture directory mode is 0700 and files are 0600. Raw captures are sensitive print data and should be removed after comparison.
+
+Manual HAOS procedure: update to 0.1.26, set `capture_raster_once: true`, restart, then submit exactly one known comparison image with the same queue/settings used for the quality test. Wait for `capture status=complete`, copy the three files from `/share/cups3-capture/`, then set `capture_raster_once: false` and restart. Do not submit a second diagnostic job expecting new files; one-shot state prevents overwrite until re-armed.
+
+Retrieve from the HAOS host shell (replace the slug with the installed add-on's full slug):
+
+```sh
+POC_ADDON_SLUG='<repository-prefix>_cups3_hp150_poc'
+mkdir -p ./cups3-reference
+for name in cups3-reference.in.raster cups3-reference.out.spl cups3-reference.meta.txt; do
+  docker cp "addon_${POC_ADDON_SLUG}:/share/cups3-capture/$name" "./cups3-reference/$name"
+done
+cat ./cups3-reference/cups3-reference.meta.txt
+sha256sum ./cups3-reference/cups3-reference.in.raster ./cups3-reference/cups3-reference.out.spl
+```
+
+The files also reside in HA's shared directory under `cups3-capture/` (0700 directory, 0600 files, owned by UID 10001); use the host-shell copy above if a share client cannot read them. Metadata is published last: require the current job's `capture status=complete` before copying, because files from an earlier armed run may still exist. Compare the same source image, dimensions, resolution and color settings with `cups24-reference.*`; different raster compression/headers can produce different whole-file hashes even for matching pixels. The raster header records the first page only, as observed by the existing HP decoder shim; stream hashes/byte counts cover the entire job. Disable the option and restart after retrieval, then delete raw captures when no longer needed.
+
+Maintenance record (2026-10-21, 0.1.26): authorized temporary capture implementation. Host verification covers exact IN/OUT/forwarded byte identity, one-shot no-overwrite, nonzero vendor exit/output, fail-open storage preflight, size-cap discard and 12 MiB simultaneous bidirectional traffic. Current worker verification: all seven capture tests and repository validation pass. The full suite cannot pass here: the metadata test class requires a C compiler that is absent; compiler/header-dependent checks are also skipped. Compiler-dependent validation remains required in the Debian build environment. No HAOS deployment or physical print is performed by development tooling.
+
 # Release 0.1.25: first raster header at the HP boundary
 
 Diagnostics only. The 0.1.24 AirPrint PDF path now completes through pdftopdf,

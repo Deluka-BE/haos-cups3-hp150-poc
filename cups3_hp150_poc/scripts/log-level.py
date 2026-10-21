@@ -23,6 +23,20 @@ def read_level(path=Path('/data/options.json')):
     return level
 
 
+
+def read_capture_once(path=Path('/data/options.json')):
+    try:
+        with Path(path).open(encoding='utf-8') as stream:
+            options = json.load(stream)
+    except FileNotFoundError:
+        return False
+    if not isinstance(options, dict):
+        raise ValueError('Invalid options object')
+    value = options.get('capture_raster_once', False)
+    if not isinstance(value, bool):
+        raise ValueError('Invalid capture toggle')
+    return value
+
 def main():
     try:
         level = read_level()

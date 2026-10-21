@@ -1,6 +1,7 @@
 """Static repository/safety checks; requires PyYAML, not a Supervisor install."""
 from pathlib import Path
 import re
+import shlex
 import subprocess
 
 import yaml
@@ -12,6 +13,7 @@ def main():
     repository = yaml.safe_load((ROOT / 'repository.yaml').read_text())
     assert isinstance(repository['name'], str) and repository['name']
     assert repository['url'] == 'https://github.com/Deluka-BE/haos-cups3-hp150-poc'
+    assert isinstance(repository['maintainer'], str) and repository['maintainer']
     configs = list(ROOT.rglob('config.yaml'))
     assert len(configs) == 1, 'Exactly one isolated app expected'
     app = configs[0].parent
@@ -20,11 +22,14 @@ def main():
         assert isinstance(config[key], str) and config[key], key
     assert re.fullmatch(r'[a-z0-9_]+', config['slug'])
     assert config['slug'] == app.name
+    assert config['url'] == repository['url']
+    assert 'image' not in config, 'Source-only add-on must build locally, not pull an image'
     assert config['arch'] == ['aarch64']
-    assert config['options'] == {'log_level': 'info'}
-    assert config['schema'] == {'log_level': 'list(fatal|error|warn|info|debug)'}
+    assert config['options'] == {'log_level': 'info', 'capture_raster_once': False}
+    assert config['schema'] == {'log_level': 'list(fatal|error|warn|info|debug)', 'capture_raster_once': 'bool'}
     assert config['stage'] == 'experimental'
     assert config['boot'] == 'manual_only'
+    assert config['startup'] == 'application'
     assert config.get('host_network') is True
     assert config['ports'] == {'8631/tcp': 8631}
     assert config['webui'] == 'http://[HOST]:[PORT:8631]/'
@@ -33,7 +38,7 @@ def main():
                 'host_pid', 'host_uts', 'host_ipc', 'host_dbus', 'gpio', 'video',
                 'docker_api', 'hassio_api', 'homeassistant_api', 'ingress'):
         assert not config.get(key), f'Forbidden access: {key}'
-    assert not config.get('map'), 'The baked-in HP files must not be hidden by mounts'
+    assert config.get('map') == ['share:rw'], 'Only the HA share mount is allowed for diagnostic captures'
     dockerfile = (app / 'Dockerfile').read_text()
     assert 'FROM debian:trixie-slim' in dockerfile
     assert config.get('usb') is True
@@ -60,12 +65,16 @@ def main():
     assert 'cp extracted/usr/lib/cups/backend-available/usb /opt/poc/backend/usb' in dockerfile
     assert 'chmod 755 /opt/poc/backend/usb' in dockerfile
     assert 'ln -s /opt/poc/backend/usb /opt/poc/diagnostics/usb' in dockerfile
-    assert f'ARG BUILD_VERSION={config["version"]}' in dockerfile
+    assert re.findall(r'^ARG BUILD_VERSION=(\S+)$', dockerfile, re.MULTILINE) == [config['version']]
+    assert re.findall(r'^ARG BUILD_ARCH=(\S+)$', dockerfile, re.MULTILINE) == ['aarch64']
+    assert f'## {config["version"]}\n' in (app / 'CHANGELOG.md').read_text()
     assert 'RUN sh /opt/poc/scripts/stage-hp-uld.sh "$BUILD_ARCH"' in dockerfile
     for label in ('version', 'type', 'arch'):
         assert f'io.hass.{label}=' in dockerfile
-    for source in re.findall(r'^COPY (\S+) ', dockerfile, re.MULTILINE):
-        assert (app / source).exists(), f'Missing build input: {source}'
+    for instruction in re.findall(r'^COPY (.+)$', dockerfile, re.MULTILINE):
+        # Check every source, including multi-source COPY instructions.
+        for source in shlex.split(instruction)[:-1]:
+            assert (app / source).exists(), f'Missing build input: {source}'
     tracked = subprocess.check_output(
         ['git', 'ls-files', '--cached', '--others', '--exclude-standard'],
         cwd=ROOT, text=True).splitlines()

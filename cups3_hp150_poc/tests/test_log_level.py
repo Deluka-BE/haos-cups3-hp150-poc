@@ -20,7 +20,8 @@ class LogLevelTests(unittest.TestCase):
     def test_defaults_and_schema(self):
         config = (ROOT / 'config.yaml').read_text()
         self.assertIn('options:\n  log_level: info\n', config)
-        self.assertIn('schema:\n  log_level: list(' + '|'.join(LOG.LEVELS) + ')\n', config)
+        self.assertIn('schema:\n  log_level: list(' + '|'.join(LOG.LEVELS) + ')\n  capture_raster_once: bool\n', config)
+        self.assertIn('capture_raster_once: false', config)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'options.json'
             self.assertEqual(LOG.read_level(path), 'info')
@@ -81,7 +82,7 @@ class LogLevelTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout.splitlines()[-1]),
                                  ['server', '-o', 'server-port=8631', '-o', 'server-options=no-tls',
                                   '-o', 'listen-hostname=0.0.0.0', '-o', 'log-file=-', '-o', 'log-level=' + level])
-                self.assertIn('INFO: lifecycle stage=startup version=0.1.24 diagnostics=enabled', result.stdout)
+                self.assertIn('INFO: lifecycle stage=startup version=0.1.26 diagnostics=enabled', result.stdout)
         result = self.launch('{}')
         self.assertEqual(json.loads(result.stdout.splitlines()[-1])[-1], 'log-level=info')
 
