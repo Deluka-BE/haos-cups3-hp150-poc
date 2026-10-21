@@ -1,6 +1,6 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
-Version **0.1.26** adds a temporary, disabled-by-default one-shot capture around the existing HP `rastertospl` boundary. When armed, the first filter invocation tees the exact CUPS raster input and SPL/QPDL output to `/share/cups3-capture/` while preserving the live stream, 0.1.25 header diagnostics, vendor exit status and existing deadline/cancellation behavior. Capture is bounded to 512 MiB per direction, requires 1152 MiB free space before arming, and fails open to printing if storage diagnostics cannot be retained. See [capture procedure and safeguards](cups3_hp150_poc/DOCS.md).
+Version **0.1.27** extends the disabled-by-default one-shot rastertospl capture with private boundary evidence (argv, allowlisted environment, PPD and vendor resource hashes). This is a diagnostics increment: the reference captures are absent from the worker, so no print-quality fix is claimed. See [diagnosis and Home Assistant procedure](cups3_hp150_poc/DOCS.md).
 
 Version **0.1.25** adds one sanitized first-page raster-header diagnostic at the
 HP rastertospl boundary. The existing decoder runs once; no raster pixels are
@@ -376,10 +376,10 @@ No automatic print jobs were run.
 
 ## Install on Home Assistant OS (2026.10)
 
-The current source version is **0.1.26**. `repository.yaml` and the add-on's
+The current source version is **0.1.27**. `repository.yaml` and the add-on's
 `config.yaml`/Dockerfile already form a source-build repository: no image registry,
 `build.yaml`, icon or logo is required for installation. Supervisor supplies
-`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.26` and
+`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.27` and
 `aarch64` for standalone builds. This installability review does not require
 another version bump or any change to the separate CUPS 2.4 add-on.
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import hashlib
+import json
 import pathlib
 import shutil
 import threading
@@ -95,6 +96,69 @@ def _claim_capture(stage, job):
         print(f'INFO: path job={job} stage=rastertospl capture status=skipped reason=storage',
               file=sys.stderr, flush=True)
         return None
+
+
+# Deliberate allowlist: never serialize service credentials or the whole environment.
+BOUNDARY_ENV = ('PPD', 'LD_LIBRARY_PATH', 'LD_PRELOAD', 'CUPS_DATADIR',
+                'CUPS_SERVERBIN', 'CUPS_SERVERROOT', 'CUPS_FONTPATH',
+                'CUPS_CACHEDIR', 'CONTENT_TYPE', 'FINAL_CONTENT_TYPE',
+                'PRINTER', 'PRINTER_INFO', 'LANG', 'LC_ALL', 'CHARSET',
+                'RIP_MAX_CACHE', 'HOME', 'TMPDIR', 'PATH')
+
+
+def _boundary_file(path, content=False):
+    result = {'path': str(path)}
+    try:
+        # Bounded diagnostics, including accidental oversized/non-regular PPDs.
+        path = pathlib.Path(path)
+        if not path.is_file() or path.stat().st_size > 16 * 1024 * 1024:
+            return dict(result, status='unavailable')
+        data = path.read_bytes()
+        result.update(status='readable', bytes=len(data),
+                      sha256=hashlib.sha256(data).hexdigest())
+        if content:
+            result['text'] = data.decode('latin1')
+    except OSError:
+        result['status'] = 'unavailable'
+    return result
+
+
+def capture_boundary(command, env):
+    """Private evidence of the actual Popen boundary; no values go to logs.
+
+    IPP attributes are upstream of this boundary; argv[5] is the exact mapped
+    option string, not proof of the original IPP request or resolved PPD marks.
+    File readability/hash proves presence, not that the vendor opened a file.
+    """
+    resources = ['/work/filter/rastertospl.real', '/work/lib/libscmssc.so']
+    cms = pathlib.Path(env.get('CUPS_DATADIR', '/usr/share/cups')) / 'model/uld-hp/cms'
+    if cms.is_dir():
+        resources.extend(str(p) for p in sorted(cms.glob('*'))[:128] if p.is_file())
+    return {'schema': 1, 'argv': list(command),
+            'environment': {k: env[k] for k in BOUNDARY_ENV if k in env},
+            'ppd': _boundary_file(env.get('PPD', ''), content=True),
+            'resources': [_boundary_file(p) for p in resources],
+            'limitations': ['environment is allowlisted', 'IPP request not captured',
+                            'resource presence does not prove vendor lookup']}
+
+
+def _save_boundary(command, env):
+    target = CAPTURE_DIR / 'cups3-reference.boundary.json'
+    part = target.with_suffix('.json.part')
+    try:
+        _safe_unlink(part)
+        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='ascii') as stream:
+            json.dump(capture_boundary(command, env), stream, ensure_ascii=True, indent=2)
+            stream.write('\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(part, target)
+        return hashlib.sha256(target.read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        _safe_unlink(part)
+        _safe_unlink(target)
+        return False
 
 
 def _capture_bad(session, reason):
@@ -225,6 +289,7 @@ def _finish_capture(session):
         os.chmod(final_out, 0o600)
         text = (f'job={session["job"]}\n'
                 f'filter_exit={session.get("filter_exit", "unknown")}\n'
+                f'boundary_sha256={session.get("boundary_sha256", "unavailable")}\n'
                 + _capture_formats(final_in, final_out)
                 + f'raster_header={session["raster_header"] or "unavailable"}\n'
                 + 'in_file=cups3-reference.in.raster\n'
@@ -262,6 +327,10 @@ def supervise(stage, command, job, timeout=180):
         print(f'INFO: path job={job} stage={stage} {message}', file=sys.stderr, flush=True)
     report('started deadline-seconds=' + str(timeout))
     capture = _claim_capture(stage, job)
+    if capture is not None:
+        saved = _save_boundary(command, env)
+        capture['boundary_sha256'] = saved or 'unavailable'
+        report('boundary status=' + ('complete' if saved else 'unavailable'))
     popen_kwargs = dict(env=env, close_fds=False, stderr=subprocess.PIPE, start_new_session=True)
     if capture is not None:
         popen_kwargs.update(stdin=subprocess.PIPE, stdout=subprocess.PIPE)

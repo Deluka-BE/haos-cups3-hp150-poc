@@ -1,5 +1,6 @@
 """One-shot stream capture tests; fake raster child only, never HP hardware."""
 import hashlib
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -46,6 +47,35 @@ class RasterCaptureTests(unittest.TestCase):
                                str(self.capture)], input=data, capture_output=True,
                               env=env, timeout=20)
 
+    def test_boundary_preserves_options_ppd_and_excludes_credentials(self):
+        spec = importlib.util.spec_from_file_location('stage', STAGE)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        ppd = Path(self.tmp.name) / 'test.ppd'
+        ppd.write_bytes(b'*DefaultScreen: Enhanced\n*DefaultQuality: 600x600_2\n')
+        argv = ['/work/filter/rastertospl.real', '7', 'user', 'title', '1',
+                'Quality=600x600_1 Screen=Normal secBrightness=50']
+        env = {'PPD': str(ppd), 'LD_LIBRARY_PATH': '/work/lib',
+               'SUPERVISOR_TOKEN': 'SECRET', 'HASSIO_TOKEN': 'SECRET',
+               'UNRELATED_SECRET': 'SECRET'}
+        evidence = module.capture_boundary(argv, env)
+        self.assertEqual(evidence['argv'], argv)
+        self.assertEqual(evidence['environment'],
+                         {'PPD': str(ppd), 'LD_LIBRARY_PATH': '/work/lib'})
+        self.assertEqual(evidence['ppd']['sha256'], hashlib.sha256(ppd.read_bytes()).hexdigest())
+        self.assertEqual(evidence['ppd']['text'], ppd.read_text())
+        self.assertNotIn('SECRET', str(evidence))
+
+    def test_boundary_publish_failure_does_not_fail_printing(self):
+        self.arm()
+        # Cannot replace a directory with the JSON file, even when running as root.
+        (self.capture / 'cups3-reference.boundary.json').mkdir()
+        result = self.run_stage(b'print continues')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b'seunitnoc tnirp')
+        self.assertIn(b'boundary status=unavailable', result.stderr)
+        self.assertIn('boundary_sha256=unavailable',
+                      (self.capture / 'cups3-reference.meta.txt').read_text())
+
     def arm(self):
         (self.state / 'armed').write_text('1\n', encoding='ascii')
 
@@ -70,6 +100,9 @@ class RasterCaptureTests(unittest.TestCase):
         self.assertIn(f'in_sha256={hashlib.sha256(data).hexdigest()}', meta)
         self.assertIn(f'out_sha256={hashlib.sha256(expected).hexdigest()}', meta)
         self.assertIn(b'capture status=complete', result.stderr)
+        boundary = self.capture / 'cups3-reference.boundary.json'
+        self.assertIn('boundary_sha256=' + hashlib.sha256(boundary.read_bytes()).hexdigest(), meta)
+        self.assertEqual(boundary.stat().st_mode & 0o777, 0o600)
         self.assertNotIn(data[:32], result.stderr)
         first_in = (self.capture / 'cups3-reference.in.raster').read_bytes()
         second = self.run_stage(b'SECOND')

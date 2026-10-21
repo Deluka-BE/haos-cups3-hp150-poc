@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.27
+
+- Extend armed one-shot capture with private boundary JSON: exact child argv, allowlisted environment, PPD content/hash and staged vendor resource identities. Link JSON to stream metadata with SHA-256; disabled capture remains unchanged.
+- Add boundary comparison tool and regression coverage for exact option/PPD preservation, credential exclusion and private permissions.
+- Diagnostics only: no quality/default/driver correction is claimed without the missing CUPS 2.4 and CUPS 3 reference evidence.
+
 ## 0.1.26
 
 - Add disabled-by-default `capture_raster_once` diagnostics around the existing supervised HP rastertospl stage; one atomic claim stores fixed-name IN CUPS raster, OUT SPL/QPDL and metadata under `/share/cups3-capture/`.

@@ -1,3 +1,33 @@
+# Release 0.1.27: rastertospl boundary evidence; quality fix pending
+
+This worker has no CUPS 2.4/3 reference raster/SPL captures or CUPS 2.4 invocation evidence. No causal A/B or physical print validation is possible with the supplied files. The archived ULD package is present, but the runtime is ARM64 and the worker is x86_64 without Docker. A size difference alone cannot identify a halftoning cause. No vendor option, library lookup or CUPS 2.4 installation is changed.
+
+Source findings: the archived HP 15x PPD defaults to `ColorModel=RGB`, `Quality=600x600_2` (Best), `Screen=Enhanced`, `Trapping=Medium`, `TonerSaveMode=Standard`, `secBrightness=50`, `secContrast=50`, `secSaturation=50`, `YellowBlue=50`. `Quality=600x600_1` (Normal) also requests 600x600 dpi. Consequently matching raster dimensions/color depth do not establish equivalent vendor quality. The pinned retrofit `_prCreateJobData` in `pappl-retrofit/print-job.c` adds libppd color/quality presets, content-optimization presets, then vendor options selected from job attributes or printer defaults. This is a plausible source of a changed option, not a proven root cause. HP resource lookup already sets `LD_LIBRARY_PATH=/work/lib` and `CUPS_DATADIR=/work/share/cups`; the staged CTS path is `/work/share/cups/model/uld-hp/cms/15xsc.cts`.
+
+With `capture_raster_once: true`, 0.1.27 additionally writes `cups3-reference.boundary.json` (0600) beside the existing streams. It contains the actual child argv including argv[0], exact mapped CUPS option string at argv[5], allowlisted child environment including the diagnostic LD_PRELOAD, full active PPD text/path/hash and vendor binary/library/CMS file identities. The existing `.meta.txt` includes `boundary_sha256`; require a matching hash and `capture status=complete` for the current job. Boundary write failure reports `boundary status=unavailable` and printing continues. The allowlist excludes service tokens and unrelated environment variables. This is not a full environment dump, an IPP request capture, a resolved PPD-mark dump or evidence that the vendor actually opened a CMS file. Original IPP attributes and printer defaults must be exported separately to distinguish upstream mapping from explicit requests. The raw argv contains username/title and possibly filenames: treat the JSON like the sensitive raster data. No such values are logged by the capture code.
+
+Home Assistant test procedure:
+
+1. Build/install local add-on 0.1.27 on the ARM64 HA host using the existing local build procedure; no worker push or release. Keep the same printer queue and source document. Set `capture_raster_once: true` in add-on configuration and restart.
+2. Submit exactly one reference job with the same application, media, color, quality and scaling as the good CUPS 2.4 job. Wait for `boundary status=complete` and `capture status=complete` with the same job id. This performs a physical print if the selected queue uses USB; the capture queue writes only to a file.
+3. In the HA host shell, set `POC_ADDON_SLUG` to the installed add-on identifier and copy all four files, including JSON:
+
+   ```sh
+   mkdir -p ./cups3-reference
+   for name in cups3-reference.in.raster cups3-reference.out.spl cups3-reference.meta.txt cups3-reference.boundary.json; do
+     docker cp "addon_${POC_ADDON_SLUG}:/share/cups3-capture/$name" "./cups3-reference/$name"
+   done
+   sha256sum ./cups3-reference/cups3-reference.boundary.json
+   ```
+
+4. Compare that SHA-256 with `boundary_sha256` in the copied metadata. Disable `capture_raster_once` and restart after copying. Retain the physical page for comparison.
+5. Supply the existing good CUPS 2.4 capture plus its exact filter argv, relevant environment, active PPD and vendor resource hashes, and the CUPS 3 bundle. Do not change CUPS 2.4. Obtain original job IPP attributes and printer defaults from existing exports/logs if available; do not infer them from raster headers. `compare-boundary.py cups24.json cups3.json` diffs matching boundary JSON schemas (exit 1 means differences, 0 identical). It prints private metadata; use a private destination.
+6. On an isolated ARM64 runtime, replay the *same* CUPS 3 raster using its captured argv/env/PPD to establish a repeatable baseline. Redirect stdout to a new SPL file and stdin from the captured raster; never invoke a USB backend. If argv[6] supplies a filename, preserve file-input semantics using the captured raster. Then use the CUPS 2.4-equivalent boundary and change one differing option at a time. Prioritize Quality, Screen, TonerSaveMode, remaining color controls, PPD content and CMS lookup. Preserve argv[0] using an exec API with a separate executable argument. Record input SHA-256, exact configuration, exit status, output size/hash and QPDL verification for every trial. Run each configuration twice. Matching output size alone is insufficient; inspect structure and finally compare physical pages before selecting a minimal fix.
+
+Worker validation: the nine capture tests pass, including exact option/PPD preservation, private permissions, credential exclusion and boundary-write failure with continued printing. Repository validation, Python syntax checks and `git diff --check` pass. Full unittest discovery runs 115 tests with zero assertion failures, eight skips and one setup error: the existing PDF metadata class requires an unavailable C compiler. ARM64 image build and physical prints were not run.
+
+The quality correction and its physical acceptance test remain pending the missing evidence. The version bump identifies the new diagnostics, not a verified quality repair.
+
 # Release 0.1.26: one-shot rastertospl IN/OUT capture
 
 This is a temporary diagnostics-only release for direct comparison with the known-good CUPS 2.4 reference. The add-on option `capture_raster_once` defaults to `false`. With it disabled, `job-stage.py` retains the 0.1.25 inherited stdin/stdout execution path: no capture pipe, file, buffering or storage check is introduced.

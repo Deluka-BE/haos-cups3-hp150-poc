@@ -115,7 +115,7 @@ class LifecycleTests(unittest.TestCase):
                 path.write_text(original)
 
     def test_release_and_startup(self):
-        self.assertIn('ARG BUILD_VERSION=0.1.26', (ROOT / 'Dockerfile').read_text())
-        self.assertIn('version: "0.1.26"', (ROOT / 'config.yaml').read_text())
-        self.assertIn('stage=startup version=0.1.26 diagnostics=enabled', (ROOT / 'scripts/entrypoint.sh').read_text())
+        self.assertIn('ARG BUILD_VERSION=0.1.27', (ROOT / 'Dockerfile').read_text())
+        self.assertIn('version: "0.1.27"', (ROOT / 'config.yaml').read_text())
+        self.assertIn('stage=startup version=0.1.27 diagnostics=enabled', (ROOT / 'scripts/entrypoint.sh').read_text())
         self.assertIn('python3 /tmp/patch-pappl-lifecycle.py .', (ROOT / 'Dockerfile').read_text())
