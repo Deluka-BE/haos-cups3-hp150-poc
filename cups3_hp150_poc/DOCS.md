@@ -1,3 +1,13 @@
+# Release 0.1.29: preload-free rastertospl A/B diagnostic
+
+The real rastertospl child now receives no `LD_PRELOAD`, including any inherited value. This applies with capture disabled or armed. The diagnostic shim source and build fixture remain available but inactive in the real print path. Shim-generated first-page header logs and corresponding metadata dimensions are therefore unavailable; stream sizes, signatures, hashes, exit status and boundary evidence remain available.
+
+One-shot raster input and SPL output capture, private boundary JSON, quality-option normalization from 0.1.28, vendor arguments/resources, USB transport and supervision remain unchanged. CUPS 2.4 is untouched. This isolates preload removal for an A/B comparison; it does not establish a cause or physical quality improvement.
+
+Build/install local 0.1.29 on the ARM64 HA host using the existing procedure. Compare against 0.1.28 with the same queue, source document and print settings. Enable `capture_raster_once`, restart and submit one job. Follow the historical four-file copy/hash procedure below, substituting 0.1.29. Require `capture status=complete`, matching boundary/stream hashes and no `LD_PRELOAD` in the boundary environment. Compare normalized options, raster input and physical output; SPL size/hash changes alone do not demonstrate improved quality. Disable capture and restart after collection.
+
+Worker validation: repository validation passed. Focused raster capture/header discovery ran 21 tests: 16 passed and five skipped for unavailable C/CUPS build dependencies; all six quality-option tests passed. Full discovery ran 122 tests: 114 passed and eight skipped, with one additional class setup error because the existing PDF metadata tests require an unavailable C compiler. All 33 tracked Python files compiled, all five tracked shell files passed `sh -n`, and `git diff --check` passed. No ARM64 image build or physical print was performed.
+
 # Release 0.1.28: minimal HP vendor quality experiment
 
 The supplied 0.1.27 boundary findings show the bad CUPS 3 invocation using `Screen=PrinterDefault` and `secSaturation=70`, differing from the HP PPD/default/good-reference behavior. This release tests that difference at the vendor filter boundary. The archived pinned HP 15x PPD was checked locally; its explicit defaults are:

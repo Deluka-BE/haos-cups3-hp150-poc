@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.29
+
+- Minimal A/B diagnostic: remove LD_PRELOAD from the real rastertospl child environment, including inherited values, for both ordinary and captured jobs. Keep the shim source/build fixture inactive.
+- Preserve one-shot raster input/SPL output and boundary capture, 0.1.28 quality normalization and unrelated print behavior. Boundary evidence now omits LD_PRELOAD; shim-generated raster-header fields are unavailable.
+- Add child-environment and capture regressions. No CUPS 2.4 changes; physical quality improvement remains unverified.
+
 ## 0.1.28
 
 - Test the reported 0.1.27 vendor-option mismatch by normalizing only the rastertospl option boundary: Screen=Enhanced; secBrightness, secContrast, secSaturation, CyanRed, MagentaGreen and YellowBlue=50, each gated on that explicit active-PPD default.

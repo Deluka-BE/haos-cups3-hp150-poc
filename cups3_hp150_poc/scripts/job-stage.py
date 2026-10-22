@@ -14,7 +14,6 @@ import shutil
 import threading
 
 
-RASTER_SHIM = '/opt/poc/lib/raster-header-diagnostics.so'
 RASTER_FIELDS = ('width', 'height', 'xdpi', 'ydpi', 'cupsBitsPerColor',
                  'cupsBitsPerPixel', 'cupsNumColors', 'cupsBytesPerLine',
                  'cupsColorSpace', 'cupsColorOrder', 'cupsCompression',
@@ -320,9 +319,9 @@ def supervise(stage, command, job, timeout=180):
     env = dict(os.environ)
     for key in ('SUPERVISOR_TOKEN', 'HASSIO_TOKEN'):
         env.pop(key, None)
-    # Scope the shim to the proprietary raster child, never Python/USB.
+    # A/B diagnostic: run the proprietary filter without any preload.
     if stage == 'rastertospl':
-        env['LD_PRELOAD'] = RASTER_SHIM + (' ' + env['LD_PRELOAD'] if env.get('LD_PRELOAD') else '')
+        env.pop('LD_PRELOAD', None)
     def report(message):
         print(f'INFO: path job={job} stage={stage} {message}', file=sys.stderr, flush=True)
     report('started deadline-seconds=' + str(timeout))

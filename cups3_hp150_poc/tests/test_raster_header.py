@@ -64,7 +64,7 @@ class RasterLoggingTests(unittest.TestCase):
                                    'import os; os.write(2,' + repr(valid) + ')'], '7', 3)
         self.assertNotIn('raster-header', log.getvalue())
 
-    def test_only_child_gets_preload_and_tokens_remain_scrubbed(self):
+    def test_raster_child_has_no_preload_and_tokens_remain_scrubbed(self):
         class Stop(Exception):
             pass
         for name in ('usb', 'rastertospl'):
@@ -77,21 +77,20 @@ class RasterLoggingTests(unittest.TestCase):
             self.assertNotIn('SUPERVISOR_TOKEN', env)
             self.assertNotIn('HASSIO_TOKEN', env)
             if name == 'rastertospl':
-                self.assertEqual(env['LD_PRELOAD'], '/opt/poc/lib/raster-header-diagnostics.so')
+                self.assertNotIn('LD_PRELOAD', env)
             else:
                 self.assertEqual(env.get('LD_PRELOAD'), os.environ.get('LD_PRELOAD'))
             self.assertNotIn('stdin', spawn.call_args.kwargs)
             self.assertNotIn('stdout', spawn.call_args.kwargs)
             self.assertFalse(spawn.call_args.kwargs['close_fds'])
 
-    def test_existing_preload_is_retained_without_logging(self):
+    def test_existing_preload_is_removed_without_logging(self):
         class Stop(Exception):
             pass
         with patch.dict(os.environ, {'LD_PRELOAD': 'PRELOAD_SECRET'}),              patch.object(stage.subprocess, 'Popen', side_effect=Stop) as spawn,              contextlib.redirect_stderr(io.StringIO()) as log:
             with self.assertRaises(Stop):
                 stage.supervise('rastertospl', ['dummy'], '7')
-        self.assertEqual(spawn.call_args.kwargs['env']['LD_PRELOAD'],
-                         stage.RASTER_SHIM + ' PRELOAD_SECRET')
+        self.assertNotIn('LD_PRELOAD', spawn.call_args.kwargs['env'])
         self.assertNotIn('PRELOAD_SECRET', log.getvalue())
 
     def test_no_stream_pixel_or_capture_code_and_build_integration(self):

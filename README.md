@@ -1,6 +1,6 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
-Version **0.1.28** is a minimal print-quality experiment based on the reported 0.1.27 boundary evidence (`Screen=PrinterDefault`, `secSaturation=70`). Immediately before rastertospl, it normalizes Screen and six HP color controls to their declared PPD defaults. One-shot diagnostic capture remains available and records the normalized vendor invocation. Physical print improvement remains unverified. See [experiment and Home Assistant procedure](cups3_hp150_poc/DOCS.md).
+Version **0.1.29** is a minimal A/B diagnostic experiment: the real HP rastertospl child runs without `LD_PRELOAD`, including the raster-header diagnostic shim. One-shot raster/SPL and boundary capture and the 0.1.28 quality-option normalization remain intact. Physical print improvement remains unverified. See [experiment and Home Assistant procedure](cups3_hp150_poc/DOCS.md).
 
 Version **0.1.25** adds one sanitized first-page raster-header diagnostic at the
 HP rastertospl boundary. The existing decoder runs once; no raster pixels are
@@ -376,10 +376,10 @@ No automatic print jobs were run.
 
 ## Install on Home Assistant OS (2026.10)
 
-The current source version is **0.1.28**. `repository.yaml` and the add-on's
+The current source version is **0.1.29**. `repository.yaml` and the add-on's
 `config.yaml`/Dockerfile already form a source-build repository: no image registry,
 `build.yaml`, icon or logo is required for installation. Supervisor supplies
-`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.28` and
+`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.29` and
 `aarch64` for standalone builds. This installability review does not require
 another version bump or any change to the separate CUPS 2.4 add-on.
 

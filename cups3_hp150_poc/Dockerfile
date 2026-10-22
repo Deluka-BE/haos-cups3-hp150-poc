@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.28
+ARG BUILD_VERSION=0.1.29
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -71,7 +71,7 @@ WORKDIR /opt/poc
 COPY mdns/ /opt/poc/mdns/
 COPY scripts/ /opt/poc/scripts/
 COPY tests/ /opt/poc/tests/
-# Only rastertospl receives this shim; no parser/pixel reader or stdin proxy.
+# Retain the diagnostic shim fixture; 0.1.29 does not preload it into rastertospl.
 RUN mkdir -p /opt/poc/lib \
     && cc -std=c11 -O2 -fPIC -shared -Wall -Wextra -Werror \
        /opt/poc/scripts/raster-header-diagnostics.c \

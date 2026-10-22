@@ -1,6 +1,7 @@
 """One-shot stream capture tests; fake raster child only, never HP hardware."""
 import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,6 +16,7 @@ RUNNER = r'''
 import importlib.util, os, pathlib, sys
 spec=importlib.util.spec_from_file_location("stage", sys.argv[1])
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+os.environ["LD_PRELOAD"]="/opt/poc/lib/raster-header-diagnostics.so INHERITED_PRELOAD"
 m.CAPTURE_STATE=pathlib.Path(sys.argv[2]); m.CAPTURE_DIR=pathlib.Path(sys.argv[3])
 m.CAPTURE_MIN_FREE=int(os.environ.get("TEST_MIN_FREE", "0"))
 m.CAPTURE_MAX_STREAM=int(os.environ.get("TEST_MAX_STREAM", str(512*1024*1024)))
@@ -109,6 +111,27 @@ class RasterCaptureTests(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual(second.stdout, b'DNOCES')
         self.assertEqual((self.capture / 'cups3-reference.in.raster').read_bytes(), first_in)
+
+    def test_real_print_stage_removes_preload_with_and_without_capture(self):
+        data = b'RaS2 diagnostic raster input'
+        child = ('import os,sys; '
+                 'assert "LD_PRELOAD" not in os.environ; '
+                 'sys.stdout.buffer.write(b"SPL"+sys.stdin.buffer.read())')
+        for enabled in (False, True):
+            with self.subTest(capture=enabled):
+                if enabled:
+                    self.arm()
+                result = self.run_stage(data, child=child, enabled=enabled)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, b'SPL' + data)
+                if enabled:
+                    self.assertEqual((self.capture / 'cups3-reference.in.raster').read_bytes(), data)
+                    self.assertEqual((self.capture / 'cups3-reference.out.spl').read_bytes(), b'SPL' + data)
+                    boundary = json.loads((self.capture / 'cups3-reference.boundary.json').read_text())
+                    self.assertNotIn('LD_PRELOAD', boundary['environment'])
+                    self.assertIn(b'capture status=complete', result.stderr)
+                else:
+                    self.assertEqual(list(self.capture.iterdir()), [])
 
     def test_metadata_records_format_dimensions_and_exit(self):
         self.arm()
