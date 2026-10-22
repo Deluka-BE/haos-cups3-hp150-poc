@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.28
+
+- Test the reported 0.1.27 vendor-option mismatch by normalizing only the rastertospl option boundary: Screen=Enhanced; secBrightness, secContrast, secSaturation, CyanRed, MagentaGreen and YellowBlue=50, each gated on that explicit active-PPD default.
+- Remove duplicate/conflicting occurrences while preserving unrelated option tokens; retain one-shot stream and actual-child boundary capture.
+- Leave raster generation, resolution/media, USB, CMS/vendor binaries and CUPS 2.4 unchanged. Add focused rewrite, idempotence, preservation, duplicate, PPD-gating and invocation-boundary tests. Physical quality improvement remains unverified.
+
 ## 0.1.27
 
 - Extend armed one-shot capture with private boundary JSON: exact child argv, allowlisted environment, PPD content/hash and staged vendor resource identities. Link JSON to stream metadata with SHA-256; disabled capture remains unchanged.

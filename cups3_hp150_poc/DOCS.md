@@ -1,3 +1,27 @@
+# Release 0.1.28: minimal HP vendor quality experiment
+
+The supplied 0.1.27 boundary findings show the bad CUPS 3 invocation using `Screen=PrinterDefault` and `secSaturation=70`, differing from the HP PPD/default/good-reference behavior. This release tests that difference at the vendor filter boundary. The archived pinned HP 15x PPD was checked locally; its explicit defaults are:
+
+| Option | Normalized value |
+| --- | --- |
+| Screen | Enhanced |
+| secBrightness | 50 |
+| secContrast | 50 |
+| secSaturation | 50 |
+| CyanRed | 50 |
+| MagentaGreen | 50 |
+| YellowBlue | 50 |
+
+`job-stage.py` rewrites only argv[5] immediately before supervising rastertospl. Each key is normalized only if the active PPD explicitly declares the expected default above. All occurrences of that key (including case variants) are removed and one canonical value is appended, including when the key was absent. Unrelated option tokens retain their quoting, escapes, values and order; separating whitespace is canonicalized. Malformed quoted options or an unreadable PPD reject the filter invocation with a fixed diagnostic rather than launching with ambiguous options. This experiment deliberately overrides explicit user choices for these seven controls.
+
+PDF-to-raster generation, Quality/resolution, media geometry, USB transport, CMS/vendor binaries and CUPS 2.4 are unchanged. The disabled-by-default diagnostic capture is preserved: its boundary JSON records the actual **normalized** argv passed to the vendor, with the same private permissions, allowlisted environment, PPD/resource hashes and stream capture. Retain the original 0.1.27 evidence separately for comparison.
+
+Build/install local 0.1.28 on the ARM64 HA host using the existing procedure. Use the same queue, source document and print settings as 0.1.27 and the good reference; enable `capture_raster_once`, restart, and submit one job. Follow the four-file copy and hash verification procedure in the historical 0.1.27 section below, substituting version 0.1.28. Verify the normalized boundary options and unchanged input raster hash where deterministic, then compare the physical pages. Disable capture and restart after collecting evidence. Do not change CUPS 2.4.
+
+Worker validation: repository validation passed; all six focused quality tests and nine existing raster-capture tests passed. Full unittest discovery ran 121 tests: 113 passed, eight skipped, plus one class setup error because the existing PDF metadata tests require an unavailable C compiler. Python compilation, shell syntax checks and `git diff --check` passed. No ARM64 image build or physical print was performed.
+
+Remaining uncertainty: the original captured bundles are not present in this worker; the boundary finding above comes from the supplied report. Vendor behavior, output structure and physical print quality require ARM64/HP hardware validation. This is an experiment, not a verified quality repair; changed SPL size/hash alone does not establish improved quality.
+
 # Release 0.1.27: rastertospl boundary evidence; quality fix pending
 
 This worker has no CUPS 2.4/3 reference raster/SPL captures or CUPS 2.4 invocation evidence. No causal A/B or physical print validation is possible with the supplied files. The archived ULD package is present, but the runtime is ARM64 and the worker is x86_64 without Docker. A size difference alone cannot identify a halftoning cause. No vendor option, library lookup or CUPS 2.4 installation is changed.

@@ -439,6 +439,42 @@ def valid_usb_uri(uri):
             and not any(ord(char) <= 32 or ord(char) == 127 for char in uri))
 
 
+# Only image-quality controls verified in the pinned HP 15x PPD. Never infer
+# defaults for absent controls or change raster/media/transport options.
+HP_QUALITY_DEFAULTS = {'Screen': 'Enhanced', 'secBrightness': '50',
+                       'secContrast': '50', 'secSaturation': '50',
+                       'CyanRed': '50', 'MagentaGreen': '50', 'YellowBlue': '50'}
+CUPS_OPTION_TOKEN = re.compile(r"""(?:[^\s'"\\]|\\.|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')+""")
+
+
+def normalize_hp_quality(options, ppd):
+    """Replace all occurrences, preserving unrelated CUPS tokens verbatim.
+
+    Gate each key on its explicit active-PPD default; this experiment must not
+    invent defaults for another PPD. Quoting/escapes remain CUPS syntax, never
+    shell syntax or shlex serialization.
+    """
+    text = pathlib.Path(ppd).read_text(encoding='latin1')
+    defaults = {key: value for key, value in HP_QUALITY_DEFAULTS.items()
+                if re.search(r'^\*Default' + key + r':[ \t]*' + value +
+                             r'[ \t]*\r?$', text, re.MULTILINE)}
+    if not defaults:
+        return options
+    tokens = []
+    end = 0
+    for match in CUPS_OPTION_TOKEN.finditer(options):
+        if options[end:match.start()].strip():
+            raise ValueError('invalid CUPS option syntax')
+        tokens.append(match.group())
+        end = match.end()
+    if options[end:].strip():
+        raise ValueError('invalid CUPS option syntax')
+    keys = {key.lower() for key in defaults}
+    retained = [token for token in tokens
+                if token.split('=', 1)[0].lower() not in keys]
+    return ' '.join(retained + [f'{key}={value}' for key, value in defaults.items()])
+
+
 def main():
     stage = sys.argv[1]
     args = sys.argv[2:]
@@ -457,6 +493,15 @@ def main():
               f'normalized-usb={str(valid_uri).lower()}', file=sys.stderr, flush=True)
         if len(args) not in (5, 6) or job == 'unknown' or not valid_uri:
             print(f'ERROR: path job={job} stage=usb rejected reason=invalid-usb-invocation retry=none',
+                  file=sys.stderr, flush=True)
+            return 1
+    if stage == 'rastertospl':
+        try:
+            if len(args) not in (5, 6):
+                raise ValueError('invalid filter argument count')
+            args[4] = normalize_hp_quality(args[4], os.environ['PPD'])
+        except (OSError, KeyError, ValueError):
+            print(f'ERROR: path job={job} stage=rastertospl rejected reason=quality-options retry=none',
                   file=sys.stderr, flush=True)
             return 1
     return supervise(stage, [executable, *args], job)

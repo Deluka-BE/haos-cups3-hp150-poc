@@ -82,7 +82,7 @@ class LogLevelTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout.splitlines()[-1]),
                                  ['server', '-o', 'server-port=8631', '-o', 'server-options=no-tls',
                                   '-o', 'listen-hostname=0.0.0.0', '-o', 'log-file=-', '-o', 'log-level=' + level])
-                self.assertIn('INFO: lifecycle stage=startup version=0.1.27 diagnostics=enabled', result.stdout)
+                self.assertIn('INFO: lifecycle stage=startup version=0.1.28 diagnostics=enabled', result.stdout)
         result = self.launch('{}')
         self.assertEqual(json.loads(result.stdout.splitlines()[-1])[-1], 'log-level=info')
 
