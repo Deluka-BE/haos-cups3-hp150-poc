@@ -174,24 +174,23 @@ class RasterDifferentialTests(unittest.TestCase):
         self.compare(self.raster(), filename=True)
         self.compare(self.raster(2), closed_stderr=True)
 
-    def test_real_shim_through_supervisor_preserves_stdout_and_redacts(self):
+    def test_supervisor_strips_real_shim_and_preserves_stdout(self):
         data = self.raster(2)
         baseline = subprocess.run([str(self.probe), 'read'], input=data,
                                   capture_output=True, timeout=3)
         runner = (
-            'import importlib.util,sys; '
+            'import importlib.util,os,sys; '
             f's=importlib.util.spec_from_file_location("stage",{str(ROOT / "scripts/job-stage.py")!r}); '
             'm=importlib.util.module_from_spec(s); s.loader.exec_module(m); '
-            f'm.RASTER_SHIM={str(self.shim)!r}; '
+            f'os.environ["LD_PRELOAD"]={str(self.shim)!r}; '
             f'sys.exit(m.supervise("rastertospl",[{str(self.probe)!r},"read"],"7",3))')
         result = subprocess.run([sys.executable, '-c', runner], input=data,
                                 capture_output=True, timeout=5,
                                 env={**os.environ, 'SUPERVISOR_TOKEN': 'TOKEN_SECRET'})
         self.assertEqual(result.returncode, baseline.returncode)
         self.assertEqual(result.stdout, baseline.stdout)
-        self.assertEqual(result.stderr.count(b'raster-header page=first'), 1)
-        self.assertIn(b'cupsNumColors=3', result.stderr)
-        self.assertIn(b'expected_bytes_per_line=39 packed_relation=equal', result.stderr)
+        self.assertNotIn(b'raster-header page=first', result.stderr)
+        self.assertNotIn(b'cupsNumColors=', result.stderr)
         self.assertIn(b'finished exit=0', result.stderr)
         for forbidden in (b'HEADER_SECRET', b'SIZE_SECRET', b'TOKEN_SECRET',
                           b'HP150_RASTER_HEADER'):

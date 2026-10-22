@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.30
+
+- Add opt-in offline saved-raster replay through staged rastertospl.real, with mandatory device/network isolation and no unsandboxed fallback. Write SPL only to a new private diagnostic directory.
+- Record interpreter, DT_NEEDED/symbol versions, ldd resolutions, loader search/dlopen trace, package versions and runtime file hashes in sorted JSON for later CUPS 2.4 comparison.
+- Preserve 0.1.29 normal printing and one-shot capture; add bubblewrap to the image and focused safety/metadata tests. Correct a stale compiled shim test to require the preload-free supervisor behavior already introduced in 0.1.29. No CUPS 2.4 changes or claimed print-quality fix.
+
 ## 0.1.29
 
 - Minimal A/B diagnostic: remove LD_PRELOAD from the real rastertospl child environment, including inherited values, for both ordinary and captured jobs. Keep the shim source/build fixture inactive.

@@ -2,7 +2,7 @@
 FROM debian:trixie-slim
 ARG LIBPPD_COMMIT=62666f01b167bdf5975b08fbab5c2f34d9277db3
 ARG RETROFIT_COMMIT=49ad525a3715a57aae24c715ef0767b55ffb1991
-ARG BUILD_VERSION=0.1.29
+ARG BUILD_VERSION=0.1.30
 ARG BUILD_ARCH=aarch64
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -12,7 +12,7 @@ RUN test "$BUILD_ARCH" = aarch64 && test "$(dpkg --print-architecture)" = arm64
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git build-essential autoconf automake libtool pkg-config gettext autopoint \
     libpappl-dev libcupsfilters2-dev libcups2-dev libcupsimage2-dev zlib1g-dev \
-    avahi-daemon avahi-utils dbus dbus-bin ghostscript poppler-utils mupdf-tools fonts-dejavu-core python3 file binutils curl cups-ipp-utils usbutils libusb-1.0-0 \
+    avahi-daemon avahi-utils dbus dbus-bin ghostscript poppler-utils mupdf-tools fonts-dejavu-core python3 file binutils bubblewrap curl cups-ipp-utils usbutils libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 # Extract the real CUPS USB transport, without installing/starting a scheduler.
 RUN mkdir -p /tmp/cups-usb /opt/poc/backend /opt/poc/diagnostics \
@@ -71,7 +71,7 @@ WORKDIR /opt/poc
 COPY mdns/ /opt/poc/mdns/
 COPY scripts/ /opt/poc/scripts/
 COPY tests/ /opt/poc/tests/
-# Retain the diagnostic shim fixture; 0.1.29 does not preload it into rastertospl.
+# Retain the diagnostic shim fixture; 0.1.30 does not preload it into rastertospl.
 RUN mkdir -p /opt/poc/lib \
     && cc -std=c11 -O2 -fPIC -shared -Wall -Wextra -Werror \
        /opt/poc/scripts/raster-header-diagnostics.c \

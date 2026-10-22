@@ -1,3 +1,68 @@
+# Release 0.1.30: offline raster replay and runtime diagnostics
+
+0.1.29 physical quality remains visibly bad. Raster input, vendor provenance,
+quality/color options and the inactive preload shim have been ruled out by the
+reported comparisons. This release gathers runtime evidence; it does not claim
+a quality fix. Normal printing and the existing one-shot capture are unchanged.
+
+Inside the built ARM64 add-on image, as the unprivileged `poc` user, run:
+
+```sh
+python3 /opt/poc/scripts/replay-runtime.py \
+  --boundary /share/cups3-capture/cups3-reference.boundary.json \
+  --raster /share/cups3-capture/cups3-reference.in.raster \
+  --output-dir /share/cups3-replay-0130
+```
+
+The output directory must not exist. Embedded PPD text is restored; use `--ppd`
+for a deliberate alternative (its hash is reported). Exact argv job/user/title,
+copies and option string are retained, bypassing quality normalization; any saved
+filename argument is replaced by captured raster on stdin. The snapshot's
+allowlisted environment is restored, except PPD is remapped and LD_PRELOAD is
+excluded as in 0.1.29. No parent service credentials or DEVICE_URI are inherited.
+LD_DEBUG=libs,files,versions is added only to this offline run. The sandbox has a
+private network, fresh /dev without USB, hidden /sys and /run, private /tmp,
+read-only root and only the diagnostic directory writable. CUPS fds 3/4 are
+closed. No backend or scheduler is invoked. The 180-second default timeout
+(`--timeout`, maximum 1800) and 512 MiB per-child-file cap bound replay.
+
+Bubblewrap needs user namespaces allowed by the host/container security policy.
+Failure leaves `sandbox-stderr.txt` and returns nonzero; there is deliberately no
+unsandboxed fallback. Do not relax the add-on's privileges for this diagnostic.
+If HA blocks namespaces, use a separate offline ARM64 diagnostic container from
+the same image, with no USB/device mounts, where user namespaces are permitted.
+No actual vendor replay is verified by source-only unit tests.
+
+Outputs are private and may contain job titles, usernames, paths, PPD content
+and vendor stderr. Keep them out of Git and public logs:
+
+- `replay.spl`: filter output only, never transported; nonzero/timeout may leave partial SPL.
+- `report.json`: sorted schema-1 JSON with effective argv/environment, original
+  boundary, input/PPD/output hashes, readelf interpreter/DT_NEEDED/symbol versions,
+  ldd -v resolutions, glibc version, sorted package inventory, runtime file
+  identities and loader trace with PID prefixes removed.
+- `loader-stderr.txt`: raw dynamic-loader search, version checks, dlopen/init
+  details (including libscmssc), mixed with vendor stderr.
+- `boundary.json`, `snapshot.ppd`, `sandbox-stderr.txt`: replay inputs and setup evidence.
+
+Compare `report.json` with a future manually collected CUPS 2.4 equivalent using
+`diff -u` or the JSON comparison helper `compare-boundary.py` (its labels are
+historically CUPS2.4/CUPS3). Preserve identical raster/options/PPD and examine
+libcups, libcupsimage, libstdc++, libc, interpreter and libscmssc resolved paths,
+versions and hashes first. JSON ordering and loader PID prefixes are normalized;
+ASLR addresses in ldd/loader text are normalized; vendor output and alternate source paths may
+still differ and are not proof of a semantic difference. Resource presence/hash
+does not prove CMS reads. Missing tools/files are explicit error records; a
+failed filter still produces a report when sandbox setup succeeded.
+
+The image uses Debian trixie-slim and distro libcups2-dev/libcupsimage2-dev,
+libcupsfilters2-dev and PAPPL, with source-built pinned libppd/retrofit under
+/usr. These are runtime ABI/library candidates despite identical HP ULD files.
+APT packages and base-image digest are not pinned, so exact installed versions
+and hashes require the built runtime report. No CUPS 2.4 repository is changed.
+
+The historical 0.1.29 procedure follows for context.
+
 # Release 0.1.29: preload-free rastertospl A/B diagnostic
 
 The real rastertospl child now receives no `LD_PRELOAD`, including any inherited value. This applies with capture disabled or armed. The diagnostic shim source and build fixture remain available but inactive in the real print path. Shim-generated first-page header logs and corresponding metadata dimensions are therefore unavailable; stream sizes, signatures, hashes, exit status and boundary evidence remain available.
