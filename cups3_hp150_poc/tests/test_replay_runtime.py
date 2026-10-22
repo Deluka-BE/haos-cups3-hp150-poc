@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -86,6 +87,78 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual((root / 'out').stat().st_mode & 0o777, 0o700)
             with patch('sys.argv', args), self.assertRaises(FileExistsError):
                 m.main()
+
+    def test_explicit_unsandboxed_selection_and_private_staging(self):
+        for opt_in in (False, True):
+            with self.subTest(opt_in=opt_in), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = root / 'protected' / 'raster'
+                source.parent.mkdir(mode=0o700)
+                source.write_bytes(b'RaS2captured')
+                boundary = root / 'boundary'
+                boundary.write_text(json.dumps({'ppd': {'text': '*PPD'},
+                                                'environment': {}, 'argv': []}))
+                out = root / 'out'
+                args = ['replay', '--boundary', str(boundary), '--raster', str(source),
+                        '--output-dir', str(out)]
+                if opt_in:
+                    args.append('--offline-unsandboxed-ok')
+                with patch('sys.argv', args), patch.object(m.subprocess, 'run') as run:
+                    run.return_value.returncode = 1
+                    self.assertEqual(m.main(), 1)
+                command = run.call_args.args[0]
+                self.assertEqual(command[0], '/usr/bin/python3' if opt_in else '/usr/bin/bwrap')
+                self.assertNotIn(str(source), command)
+                self.assertEqual((out / 'input.raster').read_bytes(), source.read_bytes())
+                for file in out.iterdir():
+                    self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(run.call_count, 1)  # no automatic retry on nonzero exit
+                self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                self.assertTrue(run.call_args.kwargs['close_fds'])
+
+    def test_unsandboxed_filter_real_stdin_output_environment_and_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code = ("import os,sys,resource; "
+                    "assert not {'DEVICE_URI','LD_PRELOAD','SUPERVISOR_TOKEN'} & os.environ.keys(); "
+                    "assert resource.getrlimit(resource.RLIMIT_FSIZE) == (536870912,)*2; "
+                    "assert resource.getrlimit(resource.RLIMIT_CORE) == (0,0); "
+                    "sys.stderr.write('fixture stderr'); "
+                    "sys.stdout.buffer.write(b'SPL:'+sys.stdin.buffer.read())")
+            raster = root / 'input.raster'
+            raster.write_bytes(b'RaS2payload')
+            ppd = root / 'input.ppd'
+            ppd.write_text('*PPD')
+            boundary = {'argv': [sys.executable, '-c', code, 't', '1', '', '/ignored'],
+                        'environment': {'DEVICE_URI': 'usb://bad', 'LD_PRELOAD': 'bad',
+                                        'SUPERVISOR_TOKEN': 'secret'}}
+            with patch.object(m, 'FILTER', sys.executable):
+                self.assertEqual(m.replay(boundary, root, 10, raster, ppd,
+                                          'offline-unsandboxed'), 0, (root / 'report.json').read_text())
+            report = json.loads((root / 'report.json').read_text())
+            self.assertEqual(report['mode'], 'offline-unsandboxed')
+            self.assertEqual((root / 'replay.spl').read_bytes(), b'SPL:RaS2payload')
+            self.assertEqual(report['input']['sha256'], m.identity(raster)['sha256'])
+            self.assertTrue(report['loader_trace'])
+            self.assertIn('runtime_files', report)
+
+    def test_unsandboxed_timeout_kills_filter_group_and_keeps_report(self):
+        boundary = {'argv': [m.FILTER, '1', 'u', 't', '1', ''], 'environment': {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            source = out / 'input'
+            source.write_bytes(b'RaS2')
+            with patch.object(m, 'probe', return_value={'error': 'unavailable'}), \
+                 patch.object(m.subprocess, 'Popen') as launch, patch.object(m.os, 'killpg') as kill:
+                launch.return_value.pid = 12345
+                launch.return_value.wait.side_effect = [subprocess.TimeoutExpired('filter', 1), -9]
+                self.assertEqual(m.replay(boundary, out, 1, source, source,
+                                          'offline-unsandboxed'), 1)
+                kill.assert_called_once_with(12345, m.signal.SIGKILL)
+            report = json.loads((out / 'report.json').read_text())
+            self.assertTrue(report['timed_out'])
+            self.assertEqual(report['filter_exit'], -9)
+            self.assertIn('sha256', report['output'])
 
     def test_identity_hash(self):
         with tempfile.TemporaryDirectory() as tmp:

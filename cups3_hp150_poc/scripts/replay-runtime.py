@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Offline HP replay: mandatory bubblewrap isolation; private comparison evidence."""
+"""Offline HP replay: bubblewrap by default; explicit unsandboxed diagnostic opt-in."""
 import argparse
 import hashlib
 import json
@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import resource
 import signal
+import shutil
 import subprocess
 import sys
 
@@ -58,30 +59,33 @@ def limits():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
-def replay(boundary, output, timeout):
+def replay(boundary, output, timeout, raster=Path('/tmp/input.raster'),
+           ppd=Path('/tmp/input.ppd'), mode='bwrap'):
     env = {k: v for k, v in boundary['environment'].items() if k in ALLOWED_ENV}
-    env['PPD'] = '/tmp/input.ppd'
+    env['PPD'] = str(ppd)
     argv = boundary['argv']
     if len(argv) not in (6, 7) or argv[0] != FILTER or not all(isinstance(v, str) for v in argv):
         raise ValueError('expected captured rastertospl argv with five CUPS arguments')
     command = [FILTER, *argv[1:6]]  # saved filename, if any, replaced by captured stdin
     report = {'schema': 1, 'argv': command, 'environment': env,
-              'input': identity('/tmp/input.raster'), 'ppd': identity(env['PPD']),
+              'mode': mode, 'input': identity(raster), 'ppd': identity(env['PPD']),
               'boundary': boundary,
               'limitations': ['allowlisted snapshot only; PPD and input paths remapped',
                               'LD_DEBUG=libs,files,versions added for this offline replay',
                               'loader trace proves library resolution, not CMS file reads',
-                              'sandbox changes devices/network/cwd/tmp; not a live-job trace']}
+                              ('sandbox changes devices/network/cwd/tmp; not a live-job trace'
+                               if mode == 'bwrap' else
+                               'UNSANDBOXED: host devices/network/files remain accessible; diagnostic filter only')]}
     report['elf'] = probe(['/usr/bin/readelf', '-l', '-d', '-V', FILTER], env)
     report['ldd'] = probe(['/usr/bin/ldd', '-v', FILTER], env)
     report['glibc'] = probe(['/usr/bin/getconf', 'GNU_LIBC_VERSION'], env)
     report['packages'] = probe(['/usr/bin/dpkg-query', '-W',
                                 '-f=${binary:Package}\t${Version}\t${Architecture}\n'], env)
     trace_env = dict(env, LD_DEBUG='libs,files,versions')
-    with open('/tmp/input.raster', 'rb') as source, (output / 'replay.spl').open('xb') as spl, (output / 'loader-stderr.txt').open('xb') as err:
+    with open(raster, 'rb') as source, (output / 'replay.spl').open('xb') as spl, (output / 'loader-stderr.txt').open('xb') as err:
         try:
             child = subprocess.Popen(command, env=trace_env, stdin=source, stdout=spl,
-                                     stderr=err, close_fds=True, start_new_session=True,
+                                     stderr=err, close_fds=True, cwd=output, start_new_session=True,
                                      preexec_fn=limits)
             try:
                 report['filter_exit'] = child.wait(timeout=timeout)
@@ -119,6 +123,8 @@ def main():
     parser.add_argument('--ppd', type=Path, help='override embedded PPD; recorded by hash')
     parser.add_argument('--output-dir', type=Path, required=True, help='must not exist')
     parser.add_argument('--timeout', type=int, default=180)
+    parser.add_argument('--offline-unsandboxed-ok', action='store_true',
+                        help='explicitly run diagnostic filter without bwrap isolation (host access remains)')
     args = parser.parse_args()
     os.umask(0o077)
     boundary = json.loads(args.boundary.read_text())
@@ -132,14 +138,27 @@ def main():
             parser.error('input is not CUPS raster')
     output = args.output_dir.resolve()
     output.mkdir(mode=0o700)  # never overwrite capture or earlier diagnostics
+    # Copy while the caller can read the protected capture directory. Bubblewrap
+    # only receives private diagnostic sources, never the original capture path.
+    staged_raster = output / 'input.raster'
+    with raster.open('rb') as source, staged_raster.open('xb') as target:
+        shutil.copyfileobj(source, target)
     ppd = output / 'snapshot.ppd'
     ppd.write_bytes(args.ppd.read_bytes() if args.ppd else boundary['ppd']['text'].encode('latin1'))
     (output / 'boundary.json').write_text(json.dumps(boundary, sort_keys=True, indent=2) + '\n')
-    # Run the worker only inside a freshly constructed sandbox; no public bypass flag.
+    mode = 'offline-unsandboxed' if args.offline_unsandboxed_ok else 'bwrap'
+    worker_output = output if args.offline_unsandboxed_ok else Path('/tmp/replay')
+    worker_raster = staged_raster if args.offline_unsandboxed_ok else Path('/tmp/input.raster')
+    worker_ppd = ppd if args.offline_unsandboxed_ok else Path('/tmp/input.ppd')
     worker = ('import runpy,json,pathlib; m=runpy.run_path(' + repr(str(Path(__file__).resolve())) + '); '
-              'raise SystemExit(m["replay"](json.loads(pathlib.Path("/tmp/replay/boundary.json").read_text()),'
-              'pathlib.Path("/tmp/replay"),' + str(args.timeout) + '))')
-    command = sandbox_command(output, raster, ppd, ['/usr/bin/python3', '-c', worker])
+              'raise SystemExit(m["replay"](json.loads(pathlib.Path(' +
+              repr(str(worker_output / 'boundary.json')) + ').read_text()),pathlib.Path(' +
+              repr(str(worker_output)) + '),' + str(args.timeout) + ',pathlib.Path(' +
+              repr(str(worker_raster)) + '),pathlib.Path(' + repr(str(worker_ppd)) + '),' +
+              repr(mode) + '))')
+    command = ['/usr/bin/python3', '-c', worker]
+    if not args.offline_unsandboxed_ok:
+        command = sandbox_command(output, staged_raster, ppd, command)
     with (output / 'sandbox-stderr.txt').open('xb') as errors:
         try:
             return subprocess.run(command, env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'},

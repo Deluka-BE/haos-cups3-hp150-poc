@@ -1,4 +1,4 @@
-# Release 0.1.30: offline raster replay and runtime diagnostics
+# Release 0.1.31: offline raster replay and runtime diagnostics
 
 0.1.29 physical quality remains visibly bad. Raster input, vendor provenance,
 quality/color options and the inactive preload shim have been ruled out by the
@@ -11,7 +11,7 @@ Inside the built ARM64 add-on image, as the unprivileged `poc` user, run:
 python3 /opt/poc/scripts/replay-runtime.py \
   --boundary /share/cups3-capture/cups3-reference.boundary.json \
   --raster /share/cups3-capture/cups3-reference.in.raster \
-  --output-dir /share/cups3-replay-0130
+  --output-dir /share/cups3-replay-0131
 ```
 
 The output directory must not exist. Embedded PPD text is restored; use `--ppd`
@@ -27,10 +27,18 @@ closed. No backend or scheduler is invoked. The 180-second default timeout
 (`--timeout`, maximum 1800) and 512 MiB per-child-file cap bound replay.
 
 Bubblewrap needs user namespaces allowed by the host/container security policy.
-Failure leaves `sandbox-stderr.txt` and returns nonzero; there is deliberately no
-unsandboxed fallback. Do not relax the add-on's privileges for this diagnostic.
-If HA blocks namespaces, use a separate offline ARM64 diagnostic container from
-the same image, with no USB/device mounts, where user namespaces are permitted.
+Failure leaves `sandbox-stderr.txt` and returns nonzero; fallback is never automatic.
+Bwrap remains the default and preferred mode. On HAOS where mount namespaces are
+blocked, rerun the command with `--offline-unsandboxed-ok` and a new output directory.
+This deliberately selects an unsandboxed offline filter run: host devices, network
+and files remain accessible, so this is weaker isolation. It does not invoke a USB
+backend, scheduler, printer transport or normal print path. Captured raster is stdin
+and SPL goes only to the private `replay.spl`; environment filtering, closed extra
+fds, timeout, file-size cap and runtime evidence collection are shared with bwrap.
+Run as unprivileged `poc`; no add-on privilege changes are required. Reports record
+`mode` as `bwrap` or `offline-unsandboxed` and describe the isolation limitation.
+Both modes first copy the raster to private `input.raster` in the new output
+directory; bwrap binds that copy rather than the protected capture-directory source.
 No actual vendor replay is verified by source-only unit tests.
 
 Outputs are private and may contain job titles, usernames, paths, PPD content
@@ -43,7 +51,7 @@ and vendor stderr. Keep them out of Git and public logs:
   identities and loader trace with PID prefixes removed.
 - `loader-stderr.txt`: raw dynamic-loader search, version checks, dlopen/init
   details (including libscmssc), mixed with vendor stderr.
-- `boundary.json`, `snapshot.ppd`, `sandbox-stderr.txt`: replay inputs and setup evidence.
+- `boundary.json`, `input.raster`, `snapshot.ppd`, `sandbox-stderr.txt`: replay inputs and setup evidence.
 
 Compare `report.json` with a future manually collected CUPS 2.4 equivalent using
 `diff -u` or the JSON comparison helper `compare-boundary.py` (its labels are
@@ -60,6 +68,17 @@ libcupsfilters2-dev and PAPPL, with source-built pinned libppd/retrofit under
 /usr. These are runtime ABI/library candidates despite identical HP ULD files.
 APT packages and base-image digest are not pinned, so exact installed versions
 and hashes require the built runtime report. No CUPS 2.4 repository is changed.
+
+Worker validation for 0.1.31: focused replay discovery ran 9 tests (8 passed,
+1 skipped because host policy blocks bwrap namespaces). Full discovery ran 131
+tests (122 passed, 9 skipped), with one additional class setup error: existing
+PDF metadata tests require an unavailable C compiler. Repository validation,
+compilation of all 35 tracked Python files, syntax checks of all 5 tracked shell
+files, and `git diff --check` passed. The real unsandboxed subprocess fixture
+verified captured stdin/private SPL, environment exclusions and resource limits;
+timeout/report behavior is covered separately. No ARM64 image build, HAOS vendor
+replay or physical print was performed. Real bwrap isolation remains unverified
+in this worker. No commit or push was made.
 
 The historical 0.1.29 procedure follows for context.
 

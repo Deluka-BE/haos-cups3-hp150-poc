@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.31
+
+- Keep bwrap replay preferred and fail closed by default; add explicit `--offline-unsandboxed-ok` diagnostic mode for HAOS namespace restrictions. Both modes run only the fixed raster filter with captured stdin, private SPL output, allowlisted credentials-free child environment, closed extra fds, limits and equivalent runtime evidence.
+- Stage raster privately before bwrap to avoid protected capture-directory bind sources. Record execution mode and isolation limitations in reports. Normal printing and CUPS 2.4 are unchanged.
+
 ## 0.1.30
 
 - Add opt-in offline saved-raster replay through staged rastertospl.real, with mandatory device/network isolation and no unsandboxed fallback. Write SPL only to a new private diagnostic directory.

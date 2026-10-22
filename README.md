@@ -1,6 +1,6 @@
 # HP Color Laser 150a: CUPS 3 retrofit PoC, phase 1
 
-Version **0.1.30** adds an offline, sandboxed raster replay and runtime library report. Normal printing and one-shot capture retain 0.1.29 behavior. Physical print quality remains visibly bad according to testing on 0.1.29; this release diagnoses the remaining runtime difference. See [replay procedure](cups3_hp150_poc/DOCS.md).
+Version **0.1.31** adds an explicit `--offline-unsandboxed-ok` diagnostic replay option for HAOS namespace restrictions, while keeping bwrap preferred and default, and stages raster input privately before bwrap. Normal printing and one-shot capture retain 0.1.29 behavior. Physical print quality remains visibly bad according to testing on 0.1.29; this release diagnoses the remaining runtime difference. See [replay procedure](cups3_hp150_poc/DOCS.md).
 
 Version **0.1.25** adds one sanitized first-page raster-header diagnostic at the
 HP rastertospl boundary. The existing decoder runs once; no raster pixels are
@@ -376,10 +376,10 @@ No automatic print jobs were run.
 
 ## Install on Home Assistant OS (2026.10)
 
-The current source version is **0.1.30**. `repository.yaml` and the add-on's
+The current source version is **0.1.31**. `repository.yaml` and the add-on's
 `config.yaml`/Dockerfile already form a source-build repository: no image registry,
 `build.yaml`, icon or logo is required for installation. Supervisor supplies
-`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.30` and
+`BUILD_VERSION` and `BUILD_ARCH`; the Dockerfile defaults match `0.1.31` and
 `aarch64` for standalone builds. This installability review does not require
 another version bump or any change to the separate CUPS 2.4 add-on.
 
